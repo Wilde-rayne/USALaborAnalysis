@@ -1,0 +1,18 @@
+# ignore data directories (raw/processed BLS, models, caches, etc.)
+data/raw/
+data/processed/
+# ignore Python caches & virtual envs
+__pycache__/
+*.py[cod]
+*.pkl
+embeddings_cache.npz
+# ignore DBs, Access files, certs, env files
+*.accdb
+.env
+# ignore your Git metadata & IDE files
+.git
+.gitignore
+.vscode/
+.venv/
+__pycache__/
+img/

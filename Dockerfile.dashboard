@@ -1,0 +1,42 @@
+# Dockerfile.dashboard
+FROM python:3.11-slim
+
+# Make Spark’s hard-coded /usr/bin/python3 path exist
+RUN ln -s /usr/local/bin/python3 /usr/bin/python3
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TF_ENABLE_ONEDNN_OPTS=0 \
+    TF_CPP_MIN_LOG_LEVEL=2 \
+    TRANSFORMERS_CACHE=/root/.cache \
+    SENTENCE_TRANSFORMERS_HOME=/root/.cache \
+    PYSPARK_PYTHON=/usr/local/bin/python3 \
+    PYSPARK_DRIVER_PYTHON=/usr/local/bin/python3
+
+# Set working directory
+WORKDIR /app
+
+# System-level deps
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends openjdk-17-jre-headless git curl procps && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# (Optional) Pre-download local embeddings model for speed
+RUN python - <<'PY'
+from sentence_transformers import SentenceTransformer
+SentenceTransformer("intfloat/e5-small-v2")
+PY
+
+# Copy app source
+COPY . .
+
+# Expose Dash port
+EXPOSE 8050
+
+# Launch command
+CMD gunicorn app:server --bind 0.0.0.0:8050 --workers 1 --threads 8 --worker-class gthread --timeout 300 --graceful-timeout 30

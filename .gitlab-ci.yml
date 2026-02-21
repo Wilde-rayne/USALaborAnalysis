@@ -1,0 +1,12 @@
+image: alpine:latest
+
+pages:
+  stage: deploy
+  script:
+    - mkdir public
+    - cp REPORT.html public/index.html     # make REPORT.html become the landing page
+  artifacts:
+    paths:
+      - public
+  only:
+    - main

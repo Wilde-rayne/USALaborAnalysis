@@ -1,0 +1,100 @@
+services:
+  ollama:
+    build:
+      context: .
+      dockerfile: Dockerfile.ollama
+    environment:
+      OLLAMA_HOST: "0.0.0.0"
+      OLLAMA_PORT: "11434"
+      BAKED: "true"
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/version || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: on-failure
+    networks:
+      - app-net
+
+  spark-master:
+    image: bitnami/spark:latest
+    environment:
+      SPARK_MODE: master
+      SPARK_MASTER_HOST: spark-master
+      PYSPARK_PYTHON: /opt/bitnami/python/bin/python3
+      PYSPARK_DRIVER_PYTHON: /opt/bitnami/python/bin/python3
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    restart: on-failure
+    networks:
+      - app-net
+
+  spark-worker:
+    image: bitnami/spark:latest
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 4G
+      SPARK_DRIVER_MEMORY: 6g
+      SPARK_EXECUTOR_MEMORY: 6g
+      PYSPARK_PYTHON: /opt/bitnami/python/bin/python3
+      PYSPARK_DRIVER_PYTHON: /opt/bitnami/python/bin/python3
+    depends_on:
+      spark-master:
+        condition: service_started
+    restart: on-failure
+    networks:
+      - app-net
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    environment:
+      OLLAMA_URL: "http://ollama:11434"        # Ollama API base URL for chat
+      OLLAMA_API_PATH: "/v1/chat/completions"             # Chat endpoint path (embedded in code)
+      OLLAMA_MODEL: "llama2:chat"             
+      PYSPARK_PYTHON: /usr/local/bin/python3
+      PYSPARK_DRIVER_PYTHON: /usr/local/bin/python3
+      BLS_API_KEY:  "99da0b2263b74759a9f2160ba748b1e3" #c1a89edcea134fbd8ef4d2e220b73e77"99da0b2263b74759a9f2160ba748b1e3"  
+      CENSUS_API_KEY: "43250f659bc9de08afa1b0b5a4835ee05774a7be"
+    depends_on:
+      ollama:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
+    ports:
+      - "8050:8050"
+    volumes:
+      - ./data:/app/data:rw
+    command: >
+      bash -lc "
+        python3 -m utils.data_pipeline &&
+        exec gunicorn app:server \
+          --bind 0.0.0.0:8050 \
+          --workers 1 \
+          --threads 8 \
+          --worker-class gthread \
+          --timeout 300 \
+          --graceful-timeout 30
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8050/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: on-failure
+    networks:
+      - app-net
+
+volumes:
+  ollama_data:
+
+networks:
+  app-net:
+    driver: bridge
