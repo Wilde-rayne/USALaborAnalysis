@@ -1,0 +1,70 @@
+# Normalize line endings for all text files; protect binaries.
+# See https://git-scm.com/docs/gitattributes
+
+* text=auto eol=lf
+
+# --- Source ---
+*.py          text eol=lf
+*.pyi         text eol=lf
+*.ipynb       text eol=lf
+
+# --- Config / data-text ---
+*.md          text eol=lf
+*.rst         text eol=lf
+*.txt         text eol=lf
+*.json        text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+*.toml        text eol=lf
+*.ini         text eol=lf
+*.cfg         text eol=lf
+*.env.example text eol=lf
+.gitignore    text eol=lf
+.dockerignore text eol=lf
+.gitattributes text eol=lf
+
+# --- Shell / infra ---
+*.sh          text eol=lf
+Dockerfile*   text eol=lf
+Makefile      text eol=lf
+
+# --- Web ---
+*.html        text eol=lf
+*.css         text eol=lf
+*.scss        text eol=lf
+*.js          text eol=lf
+*.jsx         text eol=lf
+*.ts          text eol=lf
+*.tsx         text eol=lf
+*.svg         text eol=lf
+
+# --- Binaries (never convert) ---
+*.png         binary
+*.jpg         binary
+*.jpeg        binary
+*.gif         binary
+*.ico         binary
+*.webp        binary
+*.pdf         binary
+*.zip         binary
+*.tar         binary
+*.tar.gz      binary
+*.tgz         binary
+*.gz          binary
+*.parquet     binary
+*.feather     binary
+*.npz         binary
+*.npy         binary
+*.pkl         binary
+*.pickle      binary
+*.h5          binary
+*.hdf5        binary
+*.pt          binary
+*.pth         binary
+*.ckpt        binary
+*.onnx        binary
+*.woff        binary
+*.woff2       binary
+*.ttf         binary
+*.eot         binary
+*.otf         binary

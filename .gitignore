@@ -63,3 +63,13 @@ embeddings_cache.npz
 # OS files
 .DS_Store
 Thumbs.db
+
+# Claude Code tooling (worktrees, session state)
+.claude/
+
+# Local secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
