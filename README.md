@@ -94,7 +94,25 @@ ds4010/
 - Docker & Docker Compose (v2+)
 - (Optional) Apache Spark locally or Docker image, but default is `local[*]`.
 
-### 2. Automated (`deploy.sh`)
+### 2. Configure secrets
+
+API credentials live in a git-ignored `.env` at the repo root. Create it from
+the template and fill it in:
+
+```bash
+cp .env.example .env
+# edit .env and set CENSUS_API_KEY (required) and BLS_API_KEY (optional)
+```
+
+- **BLS** — optional; unregistered calls are rate-limited. Free key:
+  https://data.bls.gov/registrationEngine/
+- **Census** — required for ACS/PEP population data. Free key:
+  https://api.census.gov/data/key_signup.html
+
+docker-compose will refuse to start with a clear error if `CENSUS_API_KEY`
+is missing.
+
+### 3. Automated (`deploy.sh`)
 
 Make the script executable and run:
 
@@ -110,7 +128,7 @@ chmod +x deploy.sh
 
 ---
 
-### 3. Manual via Docker Compose
+### 4. Manual via Docker Compose
 
 **Production** (cache volumes + one‐time build):
 

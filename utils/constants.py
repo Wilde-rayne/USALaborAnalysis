@@ -1,4 +1,11 @@
 import os
+from dotenv import load_dotenv
+
+# Pull variables from a project-root .env for local dev.
+# By default python-dotenv does not overwrite values already set in the
+# environment, so docker-compose / CI secrets still win.
+load_dotenv()
+
 
 def get_env(name, default=None, cast=str):
     val = os.getenv(name, default)
@@ -13,8 +20,15 @@ OLLAMA_API_PATH   = OLLAMA_CHAT_PATH
 OLLAMA_URL       = get_env("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL     = get_env("OLLAMA_MODEL", "llama2:chat")
 DEFAULT_TIMEOUT  = get_env("OLLAMA_TIMEOUT", 180, int)
-API_KEY = get_env("BLS_API_KEY", "99da0b2263b74759a9f2160ba748b1e3")#"99da0b2263b74759a9f2160ba748b1e3""c1a89edcea134fbd8ef4d2e220b73e77"
-CENSUS_API_KEY = get_env("CENSUS_API_KEY","43250f659bc9de08afa1b0b5a4835ee05774a7be")
+# --- API credentials (see .env.example) ---
+# BLS: optional — requests without a key work but are capped at 25 queries/day
+# and limited to 10 years per series. Register free at
+# https://data.bls.gov/registrationEngine/ for 500 queries/day + 20 years.
+# Census: required for ACS/PEP endpoints. Free at
+# https://api.census.gov/data/key_signup.html.
+BLS_API_KEY    = os.getenv("BLS_API_KEY") or None
+CENSUS_API_KEY = os.getenv("CENSUS_API_KEY") or None
+API_KEY        = BLS_API_KEY  # backward-compat alias used by fetch_ces/laus
 OUTPUT_JSON = "data/all_data.json"
 
 MODEL_NAME = OLLAMA_MODEL

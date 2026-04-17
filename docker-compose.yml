@@ -56,13 +56,16 @@ services:
       context: .
       dockerfile: Dockerfile.dashboard
     environment:
-      OLLAMA_URL: "http://ollama:11434"        # Ollama API base URL for chat
-      OLLAMA_API_PATH: "/v1/chat/completions"             # Chat endpoint path (embedded in code)
-      OLLAMA_MODEL: "llama2:chat"             
+      OLLAMA_URL: "http://ollama:11434"           # Ollama API base URL for chat
+      OLLAMA_API_PATH: "/v1/chat/completions"     # Chat endpoint path
+      OLLAMA_MODEL: "llama2:chat"
       PYSPARK_PYTHON: /usr/local/bin/python3
       PYSPARK_DRIVER_PYTHON: /usr/local/bin/python3
-      BLS_API_KEY:  "99da0b2263b74759a9f2160ba748b1e3" #c1a89edcea134fbd8ef4d2e220b73e77"99da0b2263b74759a9f2160ba748b1e3"  
-      CENSUS_API_KEY: "43250f659bc9de08afa1b0b5a4835ee05774a7be"
+      # Secrets: pulled from repo-root .env via compose substitution.
+      # BLS key is optional (unregistered calls are rate-limited).
+      # Census key is required; `:?` makes compose fail fast if missing.
+      BLS_API_KEY: "${BLS_API_KEY:-}"
+      CENSUS_API_KEY: "${CENSUS_API_KEY:?CENSUS_API_KEY not set. Copy .env.example to .env and fill it in.}"
     depends_on:
       ollama:
         condition: service_healthy

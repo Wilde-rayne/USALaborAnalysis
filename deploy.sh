@@ -80,6 +80,15 @@ wait_for_model() {
 # ——————————————————————————————
 # Pre-checks
 # ——————————————————————————————
+
+# Require a .env file so API keys aren't baked into the image or repo.
+if [ ! -f .env ]; then
+  echo "✖ Missing .env at repo root."
+  echo "  Create it with:  cp .env.example .env"
+  echo "  then fill in BLS_API_KEY (optional) and CENSUS_API_KEY (required)."
+  exit 1
+fi
+
 if pgrep -f "ollama serve" >/dev/null; then
   echo "-- stopping host Ollama"
   sudo pkill -f "ollama serve" || true

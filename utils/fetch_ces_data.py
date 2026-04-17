@@ -20,7 +20,6 @@ logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 API_URL   = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
-#API_KEY   = "99da0b2263b74759a9f2160ba748b1e3"
 HEADERS   = {"Content-Type": "application/json"}
 
 CES_JSON  = "data/ces_state_sms_codes.json"

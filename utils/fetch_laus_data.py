@@ -12,7 +12,6 @@ from .constants import API_KEY
 
 # --- Configuration ---
 BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
-#API_KEY = os.getenv("BLS_API_KEY", "99da0b2263b74759a9f2160ba748b1e3")
 CODES_PATH = os.path.join(os.path.dirname(__file__), os.pardir, "data", "laus_state_codes.json")
 RAW_DIR = os.path.join(os.path.dirname(__file__), os.pardir, "data", "raw", "laus")
 BATCH_SIZE = 10               # number of series per request

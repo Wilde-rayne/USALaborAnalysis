@@ -65,6 +65,12 @@ def fetch_population(states: List[str], start: int, end: int) -> None:
     Download state populations via Census (ACS/PEP) and write to data/raw/laus/POP_{ST}.txt.
     Each file has series_id,year,period,value (with period M01 for January).
     """
+    if not CENSUS_API_KEY:
+        raise RuntimeError(
+            "CENSUS_API_KEY is not set. The Census ACS/PEP API requires a key. "
+            "Copy .env.example to .env and set CENSUS_API_KEY (free signup at "
+            "https://api.census.gov/data/key_signup.html)."
+        )
     os.makedirs(RAW_DIR, exist_ok=True)
     for st in states:
         if st not in STATE_FIPS:
