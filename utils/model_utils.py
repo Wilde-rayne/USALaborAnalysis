@@ -1,8 +1,11 @@
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from scipy.stats import f_oneway
+
+# Heavy ML deps (tensorflow, scikit-learn, scipy) are imported lazily inside
+# the functions that need them. This keeps module import cheap for callers
+# that only need the pure-numpy utilities (create_sliding_windows,
+# forecast_with_model) and lets the test suite skip installing TensorFlow.
+
 
 def create_sliding_windows(series: np.ndarray, window_size: int = 12):
     X, Y = [], []
@@ -12,6 +15,8 @@ def create_sliding_windows(series: np.ndarray, window_size: int = 12):
     return np.array(X), np.array(Y)
 
 def build_lstm_rnn(input_timesteps: int = 12):
+    import tensorflow as tf  # noqa: PLC0415 — lazy import; see module docstring
+
     model = tf.keras.Sequential([
         tf.keras.layers.LSTM(32, activation='relu', input_shape=(input_timesteps, 1)),
         tf.keras.layers.Dense(1)
@@ -31,6 +36,9 @@ def train_test_rnn(
     Fit an LSTM on ts_df['date', colname], return:
       model, metrics dict, last_window array
     """
+    from sklearn.metrics import mean_absolute_error, mean_squared_error  # noqa: PLC0415
+    from scipy.stats import f_oneway  # noqa: PLC0415
+
     # Prepare series
     df = ts_df.dropna(subset=[colname]).set_index('date').asfreq('MS')
     df.interpolate(method='time', inplace=True)

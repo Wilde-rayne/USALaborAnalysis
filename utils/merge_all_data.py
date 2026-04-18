@@ -57,6 +57,19 @@ def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
     df_all["year"] = df_all["year"].astype(int)
     df_all["month"] = df_all["period"].str[1:].astype(int)
     df_all = df_all[(df_all.year>=start) & (df_all.year<=end) & (df_all.state.isin(states))]
+
+    # Each measure file contributes a row with its own column populated and
+    # the other measure columns as NaN. Collapse those per (state, year,
+    # period, month) so downstream merges don't fan out into duplicates.
+    id_cols = ["state", "year", "period", "month"]
+    measure_cols = [c for c in df_all.columns if c not in id_cols]
+    if measure_cols:
+        df_all = (
+            df_all
+            .groupby(id_cols, as_index=False, dropna=False)
+            [measure_cols]
+            .first()
+        )
     return df_all
 
 
@@ -113,7 +126,9 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
         panel = pd.merge(panel, df_pop, on=["state","year","month"], how="left", suffixes=("_laus","_pop"))
     else:
         logger.warning("[MERGE] No population data available - skipping population merge.")
-        panel["Population"] = pd.NA
+        # Only backfill a Population column if LAUS didn't already supply one.
+        if "Population" not in panel.columns:
+            panel["Population"] = pd.NA
 
     # consolidate population columns
     if "Population_laus" in panel.columns and "Population_pop" in panel.columns:
