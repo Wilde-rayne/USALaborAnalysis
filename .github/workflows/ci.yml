@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the runtime image; 3.12 guards against deprecation drift.
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Lightweight subset — no tensorflow/pyspark/torch. Tests that
+          # need those must be marked `integration` and run in a separate
+          # workflow.
+          pip install -r requirements-test.txt
+
+      - name: Run pytest
+        env:
+          # Keep secrets out of env so tests exercise the "unset" path.
+          BLS_API_KEY: ""
+          CENSUS_API_KEY: ""
+        run: |
+          pytest -v \
+            --tb=short \
+            --strict-markers \
+            --cov=utils \
+            --cov=tabs \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-py${{ matrix.python-version }}
+          path: coverage.xml
+          retention-days: 14
+          if-no-files-found: warn
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    # Kept in a separate job so a lint failure doesn't mask test results.
+    # Allowed to fail while the existing code is being brought up to the
+    # ruff selection declared in pyproject.toml; flip `continue-on-error`
+    # to false once the baseline is clean.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format (dry-run)
+        run: ruff format --check .

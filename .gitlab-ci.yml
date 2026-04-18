@@ -1,12 +1,62 @@
-image: alpine:latest
+stages:
+  - test
+  - deploy
+
+# Shared Python image + dep install for test/lint jobs.
+.python_base:
+  image: python:3.11-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements-test.txt
+  # Sit out heavy deps (tensorflow, pyspark) — tests that need them
+  # are marked `integration` and run in a separate pipeline.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+test:
+  extends: .python_base
+  stage: test
+  variables:
+    BLS_API_KEY: ""
+    CENSUS_API_KEY: ""
+  script:
+    - pytest -v
+      --tb=short
+      --strict-markers
+      --cov=utils --cov=tabs --cov-branch
+      --cov-report=term-missing
+      --cov-report=xml
+  coverage: '/TOTAL.*\s+(\d+\.?\d*)%/'
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - coverage.xml
+    expire_in: 14 days
+
+lint:
+  extends: .python_base
+  stage: test
+  allow_failure: true
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install ruff
+  script:
+    - ruff check .
+    - ruff format --check .
 
 pages:
   stage: deploy
+  image: alpine:latest
   script:
-    - mkdir public
-    - cp REPORT.html public/index.html     # make REPORT.html become the landing page
+    - mkdir -p public
+    - if [ -f REPORT.html ]; then cp REPORT.html public/index.html; else echo "no REPORT.html yet"; fi
   artifacts:
     paths:
       - public
-  only:
-    - main
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
