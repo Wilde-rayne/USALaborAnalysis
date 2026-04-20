@@ -22,7 +22,14 @@ MIDWEST_COL = "Midwest_LFPR"
 
 
 def _load_lfp_panel() -> pd.DataFrame:
-    """Lazy-load the merged panel and derive Midwest_LFPR."""
+    """
+    Lazy-load the merged panel and derive Midwest_LFPR.
+
+    The raw panel is keyed by (state, year, month) so each date has 12
+    rows — one per state — carrying identical values in every wide
+    column. We drop those duplicates so downstream time-series code
+    (``asfreq('MS')``, LSTM training) sees a monotone date index.
+    """
     ensure_data()  # no-op if cache is fresh
     df = pd.read_json(OUTPUT_JSON, orient="records")
     df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
@@ -34,6 +41,9 @@ def _load_lfp_panel() -> pd.DataFrame:
     df.sort_values("date", inplace=True)
     lfp_cols = [c for c in df.columns if c.endswith("_Labor_Force_Participation_Rate")]
     df[MIDWEST_COL] = df[lfp_cols].mean(axis=1, skipna=True)
+    # Collapse 12 state-rows/date into one — wide columns are identical
+    # across states for a given date.
+    df = df.drop_duplicates(subset="date")
     return df
 
 

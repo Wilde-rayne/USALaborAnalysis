@@ -20,6 +20,13 @@ supersector_model_cache: dict[tuple[str, int], dict[str, dict]] = {}
 
 
 def _load_super_panel() -> pd.DataFrame:
+    """
+    Lazy-load the merged panel.
+
+    Wide CES columns (``{state}_{sector}``) repeat across the 12
+    state-rows that share a date, so we collapse to one row per date
+    before downstream time-series code touches it.
+    """
     ensure_data()  # cache-hit if fresh
     df = pd.read_json(OUTPUT_JSON, orient="records")
     df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
@@ -29,6 +36,7 @@ def _load_super_panel() -> pd.DataFrame:
         errors="coerce",
     )
     df.sort_values("date", inplace=True)
+    df = df.drop_duplicates(subset="date")
     return df
 
 

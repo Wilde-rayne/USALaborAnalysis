@@ -75,6 +75,9 @@ def _load_panel_df():
         errors="coerce",
     )
     df.sort_values("date", inplace=True)
+    # Collapse (state, year, month) rows to one per date — wide columns
+    # are identical across the 12 state-rows that share a date.
+    df = df.drop_duplicates(subset="date")
     return df
 
 
