@@ -1,18 +1,20 @@
 services:
   ollama:
-    build:
-      context: .
-      dockerfile: Dockerfile.ollama
+    # Use the official Ollama image instead of a custom Dockerfile.
+    # Models are pulled at runtime by deploy.sh (or manually with
+    # `docker compose exec ollama ollama pull llama2:chat`) and persisted
+    # in the ollama_data volume across restarts.
+    image: ollama/ollama:latest
     environment:
-      OLLAMA_HOST: "0.0.0.0"
-      OLLAMA_PORT: "11434"
-      BAKED: "true"
+      OLLAMA_HOST: "0.0.0.0:11434"
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/version || exit 1"]
+      # Official ollama image has no curl; use the CLI against the local
+      # server. `ollama list` exits non-zero if the server isn't answering.
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 20

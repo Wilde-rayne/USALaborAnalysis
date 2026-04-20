@@ -72,12 +72,6 @@ def refresh_all(states: list[str], start_year: int, end_year: int):
       6. Validate completeness of LFPR data
     """
     try:
-        from .constants import ALL_STATES
-        states = ALL_STATES
-    except ImportError:
-        pass
-
-    try:
         logger.info(f"[PIPE] Fetching data for states: {states} ({start_year}-{end_year})")
         fetch_ces_data(states, start_year, end_year)
         fetch_laus_data(states, start_year, end_year)

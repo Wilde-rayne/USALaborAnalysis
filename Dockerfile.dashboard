@@ -17,9 +17,11 @@ ENV PYTHONUNBUFFERED=1 \
 # Set working directory
 WORKDIR /app
 
-# System-level deps
+# System-level deps. openjdk-21 is the current Debian bookworm JRE and is
+# supported by PySpark >=3.5; the older openjdk-17 was removed from the
+# python:3.11-slim apt index.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends openjdk-17-jre-headless git curl procps && \
+    apt-get install -y --no-install-recommends openjdk-21-jre-headless git curl procps && \
     rm -rf /var/lib/apt/lists/*
 
 # Python deps

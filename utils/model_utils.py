@@ -39,10 +39,13 @@ def train_test_rnn(
     from sklearn.metrics import mean_absolute_error, mean_squared_error  # noqa: PLC0415
     from scipy.stats import f_oneway  # noqa: PLC0415
 
-    # Prepare series
+    # Prepare series. interpolate fills interior gaps; ffill+bfill covers
+    # leading/trailing NaNs that time-based interpolate cannot touch.
+    # (The previous `df.fillna(inplace=True)` raised TypeError on pandas
+    #  >=2.0 because `value` is required.)
     df = ts_df.dropna(subset=[colname]).set_index('date').asfreq('MS')
     df.interpolate(method='time', inplace=True)
-    df.fillna(inplace=True)
+    df = df.ffill().bfill()
     values = df[colname].values
     if len(values) < window + 2:
         raise ValueError("Not enough data to train.")
