@@ -1,15 +1,55 @@
+import logging
+
 import pandas as pd
 import plotly.graph_objs as go
-
-from dash import html, dcc, Input, Output, State
+from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
-from utils.constants     import ALL_STATES, MONTH_MAP
-from utils.data_pipeline import OUTPUT_JSON
-from utils.llm_utils     import generate_insight
-from utils.model_utils   import forecast_with_model
+from utils.constants import ALL_STATES, MONTH_MAP  # noqa: F401 — re-exported usage
+from utils.data_pipeline import OUTPUT_JSON, ensure_data
+from utils.llm_utils import generate_insight
+from utils.model_utils import forecast_with_model, train_test_rnn
 
+logger = logging.getLogger(__name__)
+
+# Cache keyed by horizon (years). On cache miss the callback trains lazily
+# rather than raising PreventUpdate, so horizons that the startup preloader
+# didn't touch still produce a forecast on first click.
 lfp_model_cache: dict[int, dict[str, dict]] = {}
+
+IA_COL = "IA_Labor_Force_Participation_Rate"
+MIDWEST_COL = "Midwest_LFPR"
+
+
+def _load_lfp_panel() -> pd.DataFrame:
+    """Lazy-load the merged panel and derive Midwest_LFPR."""
+    ensure_data()  # no-op if cache is fresh
+    df = pd.read_json(OUTPUT_JSON, orient="records")
+    df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
+    df["date"] = pd.to_datetime(
+        df["year"].astype(str) + "-" + df["period"] + "-01",
+        format="%Y-%B-%d",
+        errors="coerce",
+    )
+    df.sort_values("date", inplace=True)
+    lfp_cols = [c for c in df.columns if c.endswith("_Labor_Force_Participation_Rate")]
+    df[MIDWEST_COL] = df[lfp_cols].mean(axis=1, skipna=True)
+    return df
+
+
+def _get_or_train_lfp(years_ahead: int, df: pd.DataFrame) -> dict[str, dict]:
+    """Return cached LFP models for the horizon or train and cache them."""
+    if years_ahead in lfp_model_cache:
+        return lfp_model_cache[years_ahead]
+
+    logger.info(f"[LFP] Cache miss for horizon={years_ahead}y — training on demand")
+    base = df[["date", IA_COL, MIDWEST_COL]].dropna()
+    entry: dict[str, dict] = {}
+    for col in (IA_COL, MIDWEST_COL):
+        model, metrics, last_window = train_test_rnn(base[["date", col]], col)
+        entry[col] = {"model": model, "metrics": metrics, "last_window": last_window}
+    lfp_model_cache[years_ahead] = entry
+    return entry
 
 
 def render_layout():
@@ -47,63 +87,41 @@ def register_callbacks(app):
         State("lfp-years-slider", "value"),
     )
     def update_lfp(n_clicks, years_ahead):
-        # Only proceed when button is clicked and cache is populated
-        if not n_clicks or years_ahead not in lfp_model_cache:
+        # Train on demand if the cache doesn't already have this horizon.
+        if not n_clicks:
             raise PreventUpdate
 
-        # Load and preprocess data
-        df = pd.read_json(OUTPUT_JSON, orient="records")
-        df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
-        df["date"] = pd.to_datetime(
-            df["year"].astype(str) + "-" + df["period"] + "-01",
-            format="%Y-%B-%d", errors="coerce"
-        )
-        df.sort_values("date", inplace=True)
+        df = _load_lfp_panel()
+        combo = df[["date", IA_COL, MIDWEST_COL]].dropna()
+        combo[IA_COL] = combo[IA_COL].astype(float)
+        combo[MIDWEST_COL] = combo[MIDWEST_COL].astype(float)
 
-        # Prepare Iowa vs. Midwest Labor Force Participation
-        ia_col = "IA_Labor_Force_Participation_Rate"
-        lfp_cols = [c for c in df.columns if c.endswith("_Labor_Force_Participation_Rate")]
-        df["Midwest_LFPR"] = df[lfp_cols].mean(axis=1, skipna=True)
+        entry = _get_or_train_lfp(years_ahead, df)
+        ia_m = entry[IA_COL]["model"]
+        ia_w = entry[IA_COL]["last_window"]
+        mw_m = entry[MIDWEST_COL]["model"]
+        mw_w = entry[MIDWEST_COL]["last_window"]
 
-        combo = df[["date", ia_col, "Midwest_LFPR"]].dropna()
-        combo[ia_col] = combo[ia_col].astype(float)
-        combo["Midwest_LFPR"] = combo["Midwest_LFPR"].astype(float)
-
-        # Retrieve pre-trained models & windows from cache
-        entry = lfp_model_cache[years_ahead]
-        ia_m = entry[ia_col]["model"]
-        ia_w = entry[ia_col]["last_window"]
-        mw_m = entry["Midwest_LFPR"]["model"]
-        mw_w = entry["Midwest_LFPR"]["last_window"]
-
-        # Generate forecasts
         months = years_ahead * 12
         preds_ia = forecast_with_model(ia_m, ia_w, months)
         preds_mw = forecast_with_model(mw_m, mw_w, months)
 
-        # Build timeline for forecast dates
         last_date = combo["date"].max()
-        dates = [last_date + pd.DateOffset(months=i+1) for i in range(months)]
+        dates = [last_date + pd.DateOffset(months=i + 1) for i in range(months)]
 
-        # Construct the Plotly figure
         fig = go.Figure([
-            go.Scatter(x=combo["date"], y=combo[ia_col],
-                       mode="lines", name="Iowa Historic"),
-            go.Scatter(x=combo["date"], y=combo["Midwest_LFPR"],
-                       mode="lines", name="Midwest Historic"),
-            go.Scatter(x=dates, y=preds_ia,
-                       mode="lines+markers", name="Iowa Forecast"),
-            go.Scatter(x=dates, y=preds_mw,
-                       mode="lines+markers", name="Midwest Forecast"),
+            go.Scatter(x=combo["date"], y=combo[IA_COL], mode="lines", name="Iowa Historic"),
+            go.Scatter(x=combo["date"], y=combo[MIDWEST_COL], mode="lines", name="Midwest Historic"),
+            go.Scatter(x=dates, y=preds_ia, mode="lines+markers", name="Iowa Forecast"),
+            go.Scatter(x=dates, y=preds_mw, mode="lines+markers", name="Midwest Forecast"),
         ])
         fig.update_layout(
             title=f"LFP Forecast (+{years_ahead} yrs)",
             xaxis_title="Date",
             yaxis_title="Labor Force Participation Rate",
-            template="plotly_white"
+            template="plotly_white",
         )
 
-        # Generate AI insight narrative
         if preds_ia and preds_mw:
             ia_final, mw_final = preds_ia[-1], preds_mw[-1]
             prompt = (
@@ -114,7 +132,6 @@ def register_callbacks(app):
         else:
             insight = "Not enough data to generate a forecast."
 
-        # Return graph and AI-generated insight
         return html.Div([
             dcc.Graph(figure=fig),
             html.Hr(),

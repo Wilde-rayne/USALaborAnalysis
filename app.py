@@ -1,54 +1,90 @@
 # app.py
+import logging
 import os
-from dotenv import load_dotenv
 import threading
-import requests
-import pandas as pd
 from datetime import datetime
-from utils.model_utils import train_test_rnn
-from utils.data_pipeline import OUTPUT_JSON
+
+import requests
+from dotenv import load_dotenv
+
 from utils.constants import (
-    ALL_STATES, MONTH_MAP, START_YEAR, END_YEAR,
-    OLLAMA_URL, OLLAMA_API_PATH, OLLAMA_MODEL, DEFAULT_TIMEOUT
+    ALL_STATES,
+    DEFAULT_TIMEOUT,
+    END_YEAR,
+    MONTH_MAP,
+    OLLAMA_API_PATH,
+    OLLAMA_MODEL,
+    OLLAMA_URL,
+    START_YEAR,
 )
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
-from utils.preload_state import preload_completed_at
+from utils import preload_state  # module so we can mutate preload_completed_at
 
-def _background_preload():
-    global preload_completed_at
+# --------------------------------------------------------------------------
+# Reactive startup
+# --------------------------------------------------------------------------
+# PRELOAD_SCOPE controls what the background thread warms up before the UI
+# becomes responsive. Tabs lazily populate the rest on first interaction.
+#
+#   none         — pure reactive. Data + embeddings + models arrive on demand.
+#   data         — DEFAULT. Ensure all_data.json exists (cache-hit if fresh).
+#   embeddings   — + warm the embeddings cache for RAG chat.
+#   lfp          — + train the 10 LFP LSTM models (~1 min).
+#   full         — + train 540 supersector × horizon models (~45 min).
+#
+# Override via environment; dev-friendly default is "data".
+PRELOAD_SCOPE = os.getenv("PRELOAD_SCOPE", "data").lower()
+VALID_SCOPES = {"none", "data", "embeddings", "lfp", "full"}
+if PRELOAD_SCOPE not in VALID_SCOPES:
+    logger.warning(
+        f"[PRELOAD] Unknown PRELOAD_SCOPE={PRELOAD_SCOPE!r}; falling back to 'data'."
+    )
+    PRELOAD_SCOPE = "data"
 
-    from utils.data_pipeline import refresh_all
-    refresh_all(ALL_STATES, 2012, END_YEAR)
 
-    from utils.embeddings import load_embeddings
-    load_embeddings()
-
+def _warm_ollama() -> None:
+    """Fire-and-forget warm-up so the first user chat isn't cold."""
     try:
-        payload = {
-            "model": OLLAMA_MODEL,
-            "messages": [{"role":"system","content":"warm up"}]
-        }
         requests.post(
             f"{OLLAMA_URL.rstrip('/')}{OLLAMA_API_PATH}",
-            json=payload,
-            timeout=DEFAULT_TIMEOUT * 2
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": [{"role": "system", "content": "warm up"}],
+            },
+            timeout=DEFAULT_TIMEOUT * 2,
         )
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — intentional best-effort
+        logger.info(f"[PRELOAD] Ollama warm-up skipped: {exc}")
+
+
+def _load_panel_df():
+    """Load the merged panel JSON into a date-indexed DataFrame."""
+    import pandas as pd
+
+    from utils.data_pipeline import OUTPUT_JSON
 
     df = pd.read_json(OUTPUT_JSON, orient="records")
     df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
-    df["date"]   = pd.to_datetime(
+    df["date"] = pd.to_datetime(
         df["year"].astype(str) + "-" + df["period"] + "-01",
-        format="%Y-%B-%d", errors="coerce"
+        format="%Y-%B-%d",
+        errors="coerce",
     )
     df.sort_values("date", inplace=True)
+    return df
 
+
+def _preload_lfp_models(df) -> None:
+    """Train the 10 LFP LSTM models (IA + Midwest × 5 horizons). ~1 min."""
     from tabs.lfp_tab import lfp_model_cache
+    from utils.model_utils import train_test_rnn
+
     ia_col = "IA_Labor_Force_Participation_Rate"
-    lfp_cols = [c for c in df if c.endswith("_Labor_Force_Participation_Rate")]
+    lfp_cols = [c for c in df.columns if c.endswith("_Labor_Force_Participation_Rate")]
     df["Midwest_LFPR"] = df[lfp_cols].mean(axis=1, skipna=True)
     base = df[["date", ia_col, "Midwest_LFPR"]].dropna()
 
@@ -59,19 +95,67 @@ def _background_preload():
             entry[col] = {"model": model, "metrics": metrics, "last_window": last_window}
         lfp_model_cache[years] = entry
 
-    from tabs.super_tab import supersector_model_cache, SUPERSECTORS
+
+def _preload_supersector_models(df) -> None:
+    """Train 9 × 5 × 12 = 540 LSTM models. Slow (~45 min). 'full' scope only."""
+    from tabs.super_tab import SUPERSECTORS, supersector_model_cache
+    from utils.model_utils import train_test_rnn
+
     for sector in SUPERSECTORS:
         for years in range(1, 6):
-            key = (sector, years)
             entry = {}
             for st in ALL_STATES:
                 col = f"{st}_{sector}"
                 sub = df[["date", col]].dropna()
                 model, metrics, last_window = train_test_rnn(sub, col)
-                entry[st] = {"model": model, "metrics": metrics, "last_window": last_window}
-            supersector_model_cache[key] = entry
+                entry[st] = {
+                    "model": model,
+                    "metrics": metrics,
+                    "last_window": last_window,
+                }
+            supersector_model_cache[(sector, years)] = entry
 
-    preload_completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def _background_preload() -> None:
+    """
+    Warm up only what PRELOAD_SCOPE asks for. Tabs handle their own
+    lazy-loading for anything skipped here.
+    """
+    started = datetime.now()
+    logger.info(f"[PRELOAD] scope={PRELOAD_SCOPE} — starting warm-up")
+
+    if PRELOAD_SCOPE == "none":
+        preload_state.preload_completed_at = (
+            f"{datetime.now():%Y-%m-%d %H:%M:%S} (scope=none)"
+        )
+        return
+
+    # Always cache-aware: fetches from BLS/Census only if data/all_data.json
+    # is missing or older than CACHE_MAX_AGE_SECONDS.
+    from utils.data_pipeline import ensure_data
+
+    ensure_data(ALL_STATES, START_YEAR, END_YEAR)
+
+    if PRELOAD_SCOPE in {"embeddings", "lfp", "full"}:
+        from utils.embeddings import load_embeddings
+
+        load_embeddings()
+
+    if PRELOAD_SCOPE in {"lfp", "full"}:
+        _warm_ollama()
+        df = _load_panel_df()
+        _preload_lfp_models(df)
+
+    if PRELOAD_SCOPE == "full":
+        df = _load_panel_df()  # reload in case lfp mutated it
+        _preload_supersector_models(df)
+
+    elapsed = datetime.now() - started
+    preload_state.preload_completed_at = (
+        f"{datetime.now():%Y-%m-%d %H:%M:%S} (scope={PRELOAD_SCOPE}, took {elapsed})"
+    )
+    logger.info(f"[PRELOAD] done: {preload_state.preload_completed_at}")
+
 
 threading.Thread(target=_background_preload, daemon=True).start()
 

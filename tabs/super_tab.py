@@ -1,16 +1,58 @@
-import pandas as pd
-import numpy as np
-import plotly.graph_objs as go
+import logging
 
-from dash import html, dcc, Input, Output, State
+import numpy as np
+import pandas as pd
+import plotly.graph_objs as go
+from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
-from utils.constants     import ALL_STATES, MONTH_MAP, SUPERSECTORS
-from utils.data_pipeline import OUTPUT_JSON
-from utils.llm_utils     import generate_insight
-from utils.model_utils   import forecast_with_model
+from utils.constants import ALL_STATES, MONTH_MAP, SUPERSECTORS
+from utils.data_pipeline import OUTPUT_JSON, ensure_data
+from utils.llm_utils import generate_insight
+from utils.model_utils import forecast_with_model, train_test_rnn
 
-supersector_model_cache: dict[tuple[str,int], dict[str, dict]] = {}
+logger = logging.getLogger(__name__)
+
+# Cache keyed by (sector, horizon-in-years). On miss the callback trains
+# per-state LSTMs on demand rather than raising PreventUpdate, so the tab
+# is usable without the startup-time 540-model preload.
+supersector_model_cache: dict[tuple[str, int], dict[str, dict]] = {}
+
+
+def _load_super_panel() -> pd.DataFrame:
+    ensure_data()  # cache-hit if fresh
+    df = pd.read_json(OUTPUT_JSON, orient="records")
+    df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
+    df["date"] = pd.to_datetime(
+        df["year"].astype(str) + "-" + df["period"] + "-01",
+        format="%Y-%B-%d",
+        errors="coerce",
+    )
+    df.sort_values("date", inplace=True)
+    return df
+
+
+def _get_or_train_supersector(sector: str, years_ahead: int, df: pd.DataFrame) -> dict[str, dict]:
+    """Return cached per-state models for (sector, horizon) or train them."""
+    key = (sector, years_ahead)
+    if key in supersector_model_cache:
+        return supersector_model_cache[key]
+
+    logger.info(f"[SUPER] Cache miss for {sector!r} +{years_ahead}y — training 12 models")
+    entry: dict[str, dict] = {}
+    for st in ALL_STATES:
+        col = f"{st}_{sector}"
+        if col not in df.columns:
+            logger.warning(f"[SUPER] column {col} missing in panel; skipping {st}")
+            continue
+        sub = df[["date", col]].dropna()
+        if sub.empty:
+            logger.warning(f"[SUPER] no data for {col}; skipping {st}")
+            continue
+        model, metrics, last_window = train_test_rnn(sub, col)
+        entry[st] = {"model": model, "metrics": metrics, "last_window": last_window}
+    supersector_model_cache[key] = entry
+    return entry
 
 
 def render_layout():
@@ -60,28 +102,21 @@ def register_callbacks(app):
         State("supersector-years-slider", "value"),
     )
     def update_super(n_clicks, sector, years_ahead):
-        # Only proceed when button is clicked and cache is populated
-        if not n_clicks or (sector, years_ahead) not in supersector_model_cache:
+        if not n_clicks:
             raise PreventUpdate
 
-        # Load and preprocess data
-        df = pd.read_json(OUTPUT_JSON, orient="records")
-        df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
-        df["date"] = pd.to_datetime(
-            df["year"].astype(str) + "-" + df["period"] + "-01",
-            format="%Y-%B-%d", errors="coerce"
-        )
-        df.sort_values("date", inplace=True)
+        df = _load_super_panel()
+        entry = _get_or_train_supersector(sector, years_ahead, df)
+        if not entry:
+            return html.Div(
+                f"No {sector.replace('_', ' ')} data available for any Midwest state.",
+                className="alert alert-warning",
+            )
 
-        # Retrieve pre-trained models & windows for this sector & horizon
-        entry = supersector_model_cache[(sector, years_ahead)]
-
-        # Generate forecasts for each state
-        forecasts = {}
-        for st in ALL_STATES:
-            m = entry[st]["model"]
-            w = entry[st]["last_window"]
-            preds = forecast_with_model(m, w, years_ahead * 12)
+        # Generate forecasts for each state that has a trained model.
+        forecasts: dict[str, float] = {}
+        for st, info in entry.items():
+            preds = forecast_with_model(info["model"], info["last_window"], years_ahead * 12)
             forecasts[st] = float(preds[-1]) if preds else 0.0
 
         # Compute Midwest aggregates

@@ -1,19 +1,86 @@
 """
 Central pipeline orchestration: fetch CES, fetch LAUS, merge into JSON.
+
+Two entry points:
+- ``refresh_all`` — always fetches from source APIs (explicit refresh).
+- ``ensure_data`` — lazy wrapper: returns cached data if fresh, else
+  calls refresh_all. Used by the reactive startup path so a container
+  with a recent ``all_data.json`` in its mounted volume skips the
+  15-20 min BLS/Census round-trip.
 """
 import logging
+import os
+import time
+from datetime import datetime
+from pathlib import Path
+
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+
+import pandas as pd
+
 from .fetch_ces_data import fetch_ces_data
 from .fetch_laus_data import fetch_laus_data
 from .fetch_population_data import fetch_population
 from .merge_all_data import merge_all_data, save_data
-from datetime import datetime
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 OUTPUT_JSON = "data/all_data.json"
 OUTPUT_CSV  = "data/all_data.csv"
+
+# How long a cached merge is considered fresh before we re-fetch.
+# Override with CACHE_MAX_AGE_SECONDS env var at container start.
+DEFAULT_CACHE_MAX_AGE_SECONDS = 7 * 24 * 3600  # 7 days
+
+
+def cache_is_fresh(path: str | None = None, max_age_seconds: int | None = None) -> bool:
+    """
+    True if ``path`` exists and was modified within the freshness window.
+
+    ``path`` defaults to the module-level ``OUTPUT_JSON`` resolved at call
+    time (not at function-definition time) so tests can monkeypatch
+    ``data_pipeline.OUTPUT_JSON`` without re-importing.
+    """
+    if path is None:
+        path = OUTPUT_JSON
+    if not os.path.exists(path):
+        return False
+    if max_age_seconds is None:
+        max_age_seconds = int(os.getenv("CACHE_MAX_AGE_SECONDS", DEFAULT_CACHE_MAX_AGE_SECONDS))
+    age = time.time() - os.path.getmtime(path)
+    return age < max_age_seconds
+
+
+def ensure_data(
+    states: list[str] | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    *,
+    force: bool = False,
+) -> str:
+    """
+    Lazy data loader. Returns the path to the merged data file, fetching
+    from BLS/Census only when the cache is missing or stale. This is the
+    entry point reactive callers (Dash callbacks, app startup) should use.
+    """
+    from .constants import ALL_STATES, END_YEAR, START_YEAR
+
+    states = states or ALL_STATES
+    start_year = start_year or START_YEAR
+    end_year = end_year or END_YEAR
+
+    if not force and cache_is_fresh(OUTPUT_JSON):
+        age_h = (time.time() - os.path.getmtime(OUTPUT_JSON)) / 3600
+        logger.info(f"[PIPE] Cache hit: {OUTPUT_JSON} (age {age_h:.1f}h)")
+        return OUTPUT_JSON
+
+    Path(OUTPUT_JSON).parent.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        f"[PIPE] Cache miss or forced refresh — fetching {start_year}-{end_year} "
+        f"for {len(states)} states"
+    )
+    refresh_all(states, start_year, end_year)
+    return OUTPUT_JSON
 
 def validate_lfpr_data(df: pd.DataFrame, states: list[str], start_year: int, end_year: int):
     """
@@ -86,15 +153,21 @@ def refresh_all(states: list[str], start_year: int, end_year: int):
         logger.error(f"[PIPE] Error in refresh_all: {e}")
 
 if __name__ == "__main__":
-    from .constants import ALL_STATES, START_YEAR, END_YEAR
+    import argparse
+
+    from .constants import ALL_STATES, END_YEAR, START_YEAR
+
+    parser = argparse.ArgumentParser(description="USA Labor Analysis data pipeline")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Fetch even if a fresh cache exists.",
+    )
+    args = parser.parse_args()
+
     print("[PIPE] Starting data pipeline")
     t0 = datetime.now()
-    fetch_ces_data(ALL_STATES, START_YEAR, END_YEAR)
-    fetch_laus_data(ALL_STATES, START_YEAR, END_YEAR)
-    fetch_population(ALL_STATES, START_YEAR, END_YEAR)
-    panel = merge_all_data(ALL_STATES, START_YEAR, END_YEAR)
-    panel = panel.sort_values(["state", "year", "month"])
-    save_data(panel, "data/all_data.csv", OUTPUT_JSON)
+    ensure_data(ALL_STATES, START_YEAR, END_YEAR, force=args.force)
     t1 = datetime.now()
     print(f"[PIPE] Completed in {t1 - t0}")
-    print(f"[PIPE] Results saved to data/all_data.csv and {OUTPUT_JSON}")
+    print(f"[PIPE] Results at data/all_data.csv and {OUTPUT_JSON}")
