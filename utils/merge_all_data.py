@@ -147,6 +147,28 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
     else:
         logger.warning("[MERGE] Cannot compute LFPR - missing Labor_Force or Population.")
 
+    # Widen per-state LAUS measures into {state}_{measure} columns so the
+    # forecast/EDA tabs can pick them up with the same `startswith("{st}_")`
+    # pattern they use for CES sector columns. This keeps the long-format
+    # originals too so any downstream consumer can pick its preferred shape.
+    wide_measures = [
+        m for m in ("Labor_Force", "Employment", "Unemployment", "Population", "LFPR")
+        if m in panel.columns
+    ]
+    for measure in wide_measures:
+        wide = panel.pivot_table(
+            index=["year", "month"],
+            columns="state",
+            values=measure,
+            aggfunc="first",
+        )
+        if measure == "LFPR":
+            wide.columns = [f"{st}_Labor_Force_Participation_Rate" for st in wide.columns]
+        else:
+            wide.columns = [f"{st}_{measure}" for st in wide.columns]
+        wide = wide.reset_index()
+        panel = pd.merge(panel, wide, on=["year", "month"], how="left")
+
     # incorporate CES sector data
     ces_rows = []
     if os.path.exists(CES_JSON):

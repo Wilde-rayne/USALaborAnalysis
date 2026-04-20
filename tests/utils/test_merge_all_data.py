@@ -119,3 +119,34 @@ class TestMergeAllData:
         # Population is forward/back-filled within state-year, so it stays populated.
         # LFPR = 100 * NaN / 3,150,000 → NaN.
         assert pd.isna(mar["LFPR"])
+
+
+class TestWidenedMeasures:
+    """
+    Forecast/EDA tabs consume {state}_{measure} columns the same way they
+    consume CES sector columns. Lock that contract in.
+    """
+
+    def test_wide_labor_force_column_exists(self, fixture_data_dirs: Path) -> None:
+        panel = merge_mod.merge_all_data(["IA"], 2020, 2020)
+        assert "IA_Labor_Force" in panel.columns
+        jan = panel[(panel["year"] == 2020) & (panel["month"] == 1)].iloc[0]
+        assert jan["IA_Labor_Force"] == 1_500_000
+
+    def test_wide_population_column_exists(self, fixture_data_dirs: Path) -> None:
+        panel = merge_mod.merge_all_data(["IA"], 2020, 2020)
+        assert "IA_Population" in panel.columns
+
+    def test_wide_lfpr_uses_participation_rate_naming(self, fixture_data_dirs: Path) -> None:
+        """Tabs look for ``{state}_Labor_Force_Participation_Rate`` explicitly."""
+        panel = merge_mod.merge_all_data(["IA"], 2020, 2020)
+        assert "IA_Labor_Force_Participation_Rate" in panel.columns
+        jan = panel[(panel["year"] == 2020) & (panel["month"] == 1)].iloc[0]
+        expected = 100.0 * 1_500_000 / 3_150_000
+        assert abs(jan["IA_Labor_Force_Participation_Rate"] - expected) < 1e-6
+
+    def test_long_format_preserved(self, fixture_data_dirs: Path) -> None:
+        """The per-row long-format columns coexist with the wide ones."""
+        panel = merge_mod.merge_all_data(["IA"], 2020, 2020)
+        for c in ("Labor_Force", "Population", "LFPR"):
+            assert c in panel.columns

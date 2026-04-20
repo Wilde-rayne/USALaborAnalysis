@@ -22,36 +22,18 @@ services:
     networks:
       - app-net
 
-  spark-master:
-    image: bitnami/spark:latest
-    environment:
-      SPARK_MODE: master
-      SPARK_MASTER_HOST: spark-master
-      PYSPARK_PYTHON: /opt/bitnami/python/bin/python3
-      PYSPARK_DRIVER_PYTHON: /opt/bitnami/python/bin/python3
-    ports:
-      - "7077:7077"
-      - "8080:8080"
-    restart: on-failure
-    networks:
-      - app-net
-
-  spark-worker:
-    image: bitnami/spark:latest
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_MEMORY: 4G
-      SPARK_DRIVER_MEMORY: 6g
-      SPARK_EXECUTOR_MEMORY: 6g
-      PYSPARK_PYTHON: /opt/bitnami/python/bin/python3
-      PYSPARK_DRIVER_PYTHON: /opt/bitnami/python/bin/python3
-    depends_on:
-      spark-master:
-        condition: service_started
-    restart: on-failure
-    networks:
-      - app-net
+  # Spark master/worker containers were dropped in favor of embedded
+  # PySpark in `local[*]` mode inside the dashboard container:
+  # - utils/embeddings.py already falls back to local[*] when
+  #   SPARK_MASTER_URL is unset, so embedding ~3k RAG snippets runs
+  #   in-process with no cluster coordination overhead.
+  # - The old bitnami/spark:latest tag was retired from Docker Hub
+  #   when Bitnami moved their free images behind the Secure catalog.
+  # - Removing the cluster also reclaims ~6GB of the Docker Desktop
+  #   memory budget for Ollama inference.
+  # If the workload ever outgrows local[*], reintroduce a cluster
+  # using apache/spark:<pinned> and set SPARK_MASTER_URL on the
+  # dashboard service.
 
   dashboard:
     build:
@@ -78,8 +60,6 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
-      spark-master:
-        condition: service_started
     ports:
       - "8050:8050"
     volumes:
