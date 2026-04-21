@@ -247,6 +247,19 @@ SOURCES: tuple[DataSource, ...] = (
             "compositional counterweight to BLS headcount series."
         ),
     ),
+    DataSource(
+        "fred",
+        "Federal Reserve Economic Data (St. Louis Fed)",
+        "https://fred.stlouisfed.org/",
+        api_available=True,
+        description=(
+            "Hundreds of state-level macro indicators via the `{ST}{IND}` "
+            "series naming convention (e.g. IAUR = Iowa unemployment rate, "
+            "INPI = Indiana personal income). Monthly/quarterly/annual "
+            "cadence; a natural companion to the Super tab's site-selection "
+            "recommendations."
+        ),
+    ),
 )
 
 

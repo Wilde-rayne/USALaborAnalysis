@@ -64,6 +64,8 @@ services:
       CENSUS_API_KEY: "${CENSUS_API_KEY:?CENSUS_API_KEY not set. Copy .env.example to .env and fill it in.}"
       # Optional — only needed if the BEA fetch agent runs.
       BEA_API_KEY: "${BEA_API_KEY:-}"
+      # Optional — only needed if the FRED fetch agent runs.
+      FRED_API_KEY: "${FRED_API_KEY:-}"
     depends_on:
       ollama:
         condition: service_healthy

@@ -157,12 +157,46 @@ def fetch_bea_personal_income(states: list[str], start_year: int, end_year: int)
     )
 
 
+@tool
+def fetch_fred_state_indicator(
+    states: list[str], indicator: str, start_year: int, end_year: int
+) -> str:
+    """
+    Download a FRED state-level indicator family. ``indicator`` must be
+    one of: "UR" (unemployment rate, monthly), "PI" (personal income,
+    quarterly), or "NGSP" (nominal gross state product, annual). Writes
+    data/raw/fred/FRED_<ST><IND>.txt files. Requires ``FRED_API_KEY``
+    env; register at https://fred.stlouisfed.org/docs/api/api_key.html.
+    """
+    from utils.fetch_fred_data import (  # noqa: PLC0415
+        FRED_INDICATORS,
+        fetch_fred_state_series,
+    )
+
+    ind = str(indicator).upper()
+    if ind not in FRED_INDICATORS:
+        raise ValueError(
+            f"unknown FRED indicator: {indicator!r}; supported: "
+            f"{sorted(FRED_INDICATORS)}"
+        )
+    codes = _normalize_states(states)
+    _validate_year_range(start_year, end_year)
+    written = fetch_fred_state_series(codes, ind, start_year, end_year)
+    desc, _ = FRED_INDICATORS[ind]
+    return (
+        f"Fetched FRED {ind} ({desc}) for {len(codes)} state(s): "
+        f"{', '.join(codes)} over {start_year}-{end_year}; "
+        f"{written} rows written."
+    )
+
+
 #: The canonical toolbelt an orchestration agent gets by default.
 ALL_TOOLS: tuple["BaseTool", ...] = (
     fetch_bls_ces,
     fetch_bls_laus,
     fetch_census_population,
     fetch_bea_personal_income,
+    fetch_fred_state_indicator,
     ensure_merged_data,
     describe_series,
 )
