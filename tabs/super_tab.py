@@ -104,6 +104,107 @@ def _selection_summary(entry: dict[str, ForecastResult]) -> html.Div:
     )
 
 
+def _recommendation_panel(
+    forecasts: dict[str, float],
+    *,
+    sector: str,
+    years_ahead: int,
+    top_n: int = 3,
+) -> html.Div:
+    """
+    "Where's the best place to site this sector?" card.
+
+    Ranks states by forecasted employment, reports the top-N and
+    bottom-N relative to the median, and annotates each with its
+    percent delta so a reader can eyeball the spread.
+    """
+    # Separate per-state forecasts from the aggregate rows the caller
+    # also sticks into ``forecasts``.
+    states_only = {k: v for k, v in forecasts.items() if not k.startswith("Midwest")}
+    if len(states_only) < 2:
+        return html.Div()
+
+    sorted_items = sorted(states_only.items(), key=lambda p: p[1], reverse=True)
+    median = float(np.median([v for _, v in sorted_items]))
+
+    def _row(rank: int, state: str, value: float) -> html.Tr:
+        pct = ((value - median) / median * 100.0) if median else 0.0
+        arrow = "▲" if pct > 0 else ("▼" if pct < 0 else "–")
+        return html.Tr(
+            [
+                html.Td(f"#{rank}"),
+                html.Td(state),
+                html.Td(f"{value:,.1f}"),
+                html.Td(f"{arrow} {pct:+.1f}% vs median"),
+            ]
+        )
+
+    top_rows = [
+        _row(i + 1, st, v) for i, (st, v) in enumerate(sorted_items[:top_n])
+    ]
+    bot_rows = [
+        _row(len(sorted_items) - (top_n - 1 - i), st, v)
+        for i, (st, v) in enumerate(reversed(sorted_items[-top_n:]))
+    ]
+
+    readable_sector = sector.replace("_", " ")
+    return html.Div(
+        [
+            html.H6(
+                f"Where to site {readable_sector} (+{years_ahead} yr forecast)"
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Small("Top 3 — strongest forecast",
+                                       className="text-success fw-bold"),
+                            html.Table(
+                                [html.Tbody(top_rows)],
+                                className="table table-sm mb-3",
+                            ),
+                        ]
+                    ),
+                    html.Div(
+                        [
+                            html.Small("Bottom 3 — weakest forecast",
+                                       className="text-danger fw-bold"),
+                            html.Table(
+                                [html.Tbody(bot_rows)],
+                                className="table table-sm",
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+            html.Small(
+                f"Median forecast across states: {median:,.1f}",
+                className="text-muted",
+            ),
+        ],
+        className="alert alert-light border mb-3",
+    )
+
+
+def _apply_threshold(
+    forecasts: dict[str, float], threshold_pct: float | None
+) -> dict[str, float]:
+    """
+    Drop per-state entries whose forecast is below ``threshold_pct``% of
+    the median. Aggregate rows ("Midwest Mean / Median") always pass.
+    A ``None`` or non-positive threshold disables the filter.
+    """
+    if not threshold_pct or threshold_pct <= 0:
+        return forecasts
+    states_only = {k: v for k, v in forecasts.items() if not k.startswith("Midwest")}
+    if not states_only:
+        return forecasts
+    median = float(np.median(list(states_only.values())))
+    cutoff = median * (threshold_pct / 100.0)
+    kept = {k: v for k, v in forecasts.items() if k.startswith("Midwest") or v >= cutoff}
+    return kept
+
+
 def render_layout():
     return html.Div(
         [
@@ -139,6 +240,28 @@ def render_layout():
                         marks={i: str(i) for i in range(1, 6)},
                         value=2,
                     ),
+                ],
+                className="mb-2",
+            ),
+            html.Div(
+                [
+                    html.Label(
+                        "Hide states under % of median (0 = show all):",
+                        className="form-label small",
+                    ),
+                    dcc.Slider(
+                        id="supersector-threshold",
+                        min=0,
+                        max=80,
+                        step=10,
+                        marks={0: "off", 25: "25%", 50: "50%", 75: "75%"},
+                        value=0,
+                    ),
+                ],
+                className="mb-2",
+            ),
+            html.Div(
+                [
                     html.Button(
                         "Run Forecast", id="supersector-run", className="mt-2 btn btn-primary"
                     ),
@@ -170,8 +293,9 @@ def register_callbacks(app):
         Input("supersector-run", "n_clicks"),
         State("supersector-dropdown", "value"),
         State("supersector-years-slider", "value"),
+        State("supersector-threshold", "value"),
     )
-    def update_super(n_clicks, sector, years_ahead):
+    def update_super(n_clicks, sector, years_ahead, threshold):
         if not n_clicks:
             raise PreventUpdate
 
@@ -192,6 +316,12 @@ def register_callbacks(app):
         vals = np.array(list(forecasts.values()), dtype=float)
         forecasts["Midwest Mean"] = float(vals.mean())
         forecasts["Midwest Median"] = float(np.median(vals))
+
+        # Capture full set before threshold filter for the recommendation
+        # panel (so users see the ranked top/bottom regardless of display
+        # filter).
+        all_forecasts = dict(forecasts)
+        forecasts = _apply_threshold(forecasts, threshold)
 
         items = sorted(forecasts.items(), key=lambda x: x[1], reverse=True)
         labels, data = zip(*items)
@@ -239,6 +369,9 @@ def register_callbacks(app):
             [
                 dcc.Graph(figure=fig),
                 html.Hr(),
+                _recommendation_panel(
+                    all_forecasts, sector=sector, years_ahead=years_ahead
+                ),
                 _selection_summary(entry),
                 html.Hr(),
                 dcc.Markdown(insight),

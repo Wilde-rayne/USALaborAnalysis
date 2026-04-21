@@ -18,6 +18,11 @@ from dash.exceptions import PreventUpdate
 from utils.constants import ALL_STATES, MONTH_MAP  # noqa: F401 — re-exported usage
 from utils.data_pipeline import OUTPUT_JSON, ensure_data
 from utils.forecasting import ForecastResult, select_forecaster
+from utils.forecasting.trend import (
+    TrendSummary,
+    rolling_statistics,
+    summarize_trend,
+)
 from utils.llm_utils import generate_insight
 
 logger = logging.getLogger(__name__)
@@ -70,6 +75,69 @@ def _get_or_train_lfp(years_ahead: int, df: pd.DataFrame) -> dict[str, ForecastR
         entry[col] = result
     lfp_model_cache[years_ahead] = entry
     return entry
+
+
+def _trend_summary_table(summaries: dict[str, TrendSummary | None]) -> html.Div:
+    """
+    Compact level/change/range/volatility table, one row per series.
+
+    Only renders rows whose summary is non-None (empty / all-NaN series
+    are skipped) so the table never shows blanks.
+    """
+    def _pct(p: float | None) -> str:
+        if p is None:
+            return "—"
+        arrow = "▲" if p > 0 else "▼" if p < 0 else "–"
+        return f"{arrow} {p:+.2f}%"
+
+    rows = []
+    for label, s in summaries.items():
+        if s is None:
+            continue
+        rows.append(
+            html.Tr(
+                [
+                    html.Td(label),
+                    html.Td(f"{s.current:.2f}%"),
+                    html.Td(_pct(s.pct_1y)),
+                    html.Td(_pct(s.pct_5y)),
+                    html.Td(f"{s.all_time_low:.2f}%"),
+                    html.Td(f"{s.all_time_high:.2f}%"),
+                    html.Td(f"{s.volatility:.2f}"),
+                    html.Td(f"{s.n_obs}"),
+                ]
+            )
+        )
+    if not rows:
+        return html.Div()
+    return html.Div(
+        [
+            html.H6("Trend summary"),
+            html.Table(
+                [
+                    html.Thead(
+                        html.Tr(
+                            [
+                                html.Th(c)
+                                for c in (
+                                    "Series",
+                                    "Current",
+                                    "1-yr Δ",
+                                    "5-yr Δ",
+                                    "All-time low",
+                                    "All-time high",
+                                    "σ (vol)",
+                                    "n obs",
+                                )
+                            ]
+                        )
+                    ),
+                    html.Tbody(rows),
+                ],
+                className="table table-sm table-striped mb-3",
+            ),
+        ]
+    )
 
 
 def _model_rationale_table(col_label: str, result: ForecastResult) -> html.Div:
@@ -190,24 +258,28 @@ def register_callbacks(app):
         last_date = combo["date"].max()
         dates = [last_date + pd.DateOffset(months=i + 1) for i in range(months)]
 
+        # 12-month rolling mean overlays so the chart highlights the
+        # trend under the monthly noise. Plotted as dashed lines to stay
+        # visually subordinate to the raw series.
+        ia_roll_mean, _ = rolling_statistics(combo[IA_COL].to_numpy(), window=12)
+        mw_roll_mean, _ = rolling_statistics(combo[MIDWEST_COL].to_numpy(), window=12)
+
         fig = go.Figure(
             [
-                go.Scatter(x=combo["date"], y=combo[IA_COL], mode="lines", name="Iowa Historic"),
-                go.Scatter(
-                    x=combo["date"], y=combo[MIDWEST_COL], mode="lines", name="Midwest Historic"
-                ),
-                go.Scatter(
-                    x=dates,
-                    y=preds_ia,
-                    mode="lines+markers",
-                    name=f"Iowa Forecast ({ia_result.name})",
-                ),
-                go.Scatter(
-                    x=dates,
-                    y=preds_mw,
-                    mode="lines+markers",
-                    name=f"Midwest Forecast ({mw_result.name})",
-                ),
+                go.Scatter(x=combo["date"], y=combo[IA_COL], mode="lines", name="Iowa Historic",
+                           line=dict(width=1.5)),
+                go.Scatter(x=combo["date"], y=ia_roll_mean, mode="lines",
+                           name="Iowa 12-mo avg",
+                           line=dict(dash="dash", color="rgba(31,119,180,0.55)", width=2)),
+                go.Scatter(x=combo["date"], y=combo[MIDWEST_COL], mode="lines",
+                           name="Midwest Historic", line=dict(width=1.5)),
+                go.Scatter(x=combo["date"], y=mw_roll_mean, mode="lines",
+                           name="Midwest 12-mo avg",
+                           line=dict(dash="dash", color="rgba(255,127,14,0.55)", width=2)),
+                go.Scatter(x=dates, y=preds_ia, mode="lines+markers",
+                           name=f"Iowa Forecast ({ia_result.name})"),
+                go.Scatter(x=dates, y=preds_mw, mode="lines+markers",
+                           name=f"Midwest Forecast ({mw_result.name})"),
             ]
         )
         fig.update_layout(
@@ -224,10 +296,20 @@ def register_callbacks(app):
         )
         insight = generate_insight(prompt)
 
+        # Trend summary — one row per series, displayed between the
+        # chart and the model-rationale tables.
+        trend_panel = _trend_summary_table(
+            {
+                "Iowa": summarize_trend(combo[IA_COL].to_numpy()),
+                "Midwest mean": summarize_trend(combo[MIDWEST_COL].to_numpy()),
+            }
+        )
+
         return html.Div(
             [
                 dcc.Graph(figure=fig),
                 html.Hr(),
+                trend_panel,
                 _model_rationale_table("Iowa", ia_result),
                 _model_rationale_table("Midwest mean", mw_result),
                 html.Hr(),
