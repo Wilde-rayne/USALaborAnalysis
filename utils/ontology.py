@@ -349,6 +349,73 @@ class Ontology:
         kinds_set = set(kinds) if kinds else None
         return [s for s in self.states.values() if kinds_set is None or s.kind in kinds_set]
 
+    def state_codes(
+        self,
+        *,
+        kinds: Iterable[str] | None = None,
+        regions: Iterable[str] | None = None,
+    ) -> list[str]:
+        """
+        All matching state/territory codes, deterministically sorted.
+
+        Example::
+
+            ONTOLOGY.state_codes()                      # all 56
+            ONTOLOGY.state_codes(kinds=("state", "district"))   # 51
+            ONTOLOGY.state_codes(regions=("Midwest",))  # 12 Midwest states
+        """
+        kinds_set = set(kinds) if kinds else None
+        regions_set = set(regions) if regions else None
+        out = [
+            s.code
+            for s in self.states.values()
+            if (kinds_set is None or s.kind in kinds_set)
+            and (regions_set is None or s.region in regions_set)
+        ]
+        return sorted(out)
+
+    # --- BLS series id generation ------------------------------------------
+    def ces_series_id(
+        self,
+        state: str,
+        supersector: str,
+        *,
+        datatype: str = "01",
+        seasonal: str = "S",
+    ) -> str:
+        """
+        Build a BLS CES state-level series id.
+
+        Format (20 chars total): ``SM`` + seasonal flag ("S"/"U") +
+        FIPS(2) + area "00000" + supersector(2) + industry "000000" +
+        datatype(2). The defaults (``datatype="01"`` = all-employees
+        in thousands, ``seasonal="S"`` = seasonally adjusted) are the
+        ones the existing pipeline already downloads.
+        """
+        if seasonal not in {"S", "U"}:
+            raise ValueError(f"seasonal must be 'S' or 'U', got {seasonal!r}")
+        if len(datatype) != 2 or not datatype.isdigit():
+            raise ValueError(f"datatype must be 2 digits, got {datatype!r}")
+        st = self.state(state)
+        ss = self.supersector(supersector)
+        return f"SM{seasonal}{st.fips}00000{ss.code}000000{datatype}"
+
+    def laus_series_id(self, state: str, measure: str) -> str:
+        """
+        Build a LAUS state-level series id.
+
+        Format (20 chars): ``LASST`` + FIPS(2) + "0000000000" +
+        measure suffix(3). Measures without a ``laus_suffix`` (e.g.
+        the derived LFPR) raise.
+        """
+        st = self.state(state)
+        m = self.measure(measure)
+        if not m.laus_suffix:
+            raise ValueError(
+                f"measure {measure!r} has no LAUS suffix (is it derived or Census?)"
+            )
+        return f"LASST{st.fips}0000000000{m.laus_suffix}"
+
 
 #: Module-level singleton — the ontology is a configuration, not a connection.
 ONTOLOGY = Ontology()

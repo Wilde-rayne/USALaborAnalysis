@@ -152,3 +152,80 @@ class TestOntologyConstruction:
         fresh = Ontology()
         assert set(fresh.states.keys()) == set(ONTOLOGY.states.keys())
         assert set(fresh.supersectors.keys()) == set(ONTOLOGY.supersectors.keys())
+
+
+class TestStateCodes:
+    def test_default_returns_all_56(self) -> None:
+        codes = ONTOLOGY.state_codes()
+        assert len(codes) == 56
+        assert codes == sorted(codes)
+
+    def test_states_only_kinds(self) -> None:
+        codes = ONTOLOGY.state_codes(kinds=("state",))
+        assert len(codes) == 50
+        assert "DC" not in codes
+        assert "PR" not in codes
+
+    def test_states_plus_district(self) -> None:
+        codes = ONTOLOGY.state_codes(kinds=("state", "district"))
+        assert len(codes) == 51
+        assert "DC" in codes
+
+    def test_region_filter(self) -> None:
+        midwest = ONTOLOGY.state_codes(regions=("Midwest",))
+        assert len(midwest) == 12
+        assert set(midwest) == {"IA", "IL", "IN", "KS", "MI", "MN",
+                                "MO", "ND", "NE", "OH", "SD", "WI"}
+
+    def test_kinds_and_regions_compose(self) -> None:
+        # Territories in the Caribbean.
+        caribbean_terr = ONTOLOGY.state_codes(
+            kinds=("territory",), regions=("Caribbean",)
+        )
+        assert set(caribbean_terr) == {"PR", "VI"}
+
+
+class TestCesSeriesIdGeneration:
+    def test_generates_expected_format(self) -> None:
+        sid = ONTOLOGY.ces_series_id("IA", "Manufacturing")
+        # Round-trip through parse_series_id.
+        spec = ONTOLOGY.parse_series_id(sid)
+        assert spec.state.code == "IA"
+        assert spec.supersector is not None
+        assert spec.supersector.key == "Manufacturing"
+
+    def test_seasonal_flag_prefix(self) -> None:
+        sid_s = ONTOLOGY.ces_series_id("IA", "Manufacturing", seasonal="S")
+        sid_u = ONTOLOGY.ces_series_id("IA", "Manufacturing", seasonal="U")
+        assert sid_s.startswith("SMS")
+        assert sid_u.startswith("SMU")
+
+    def test_invalid_seasonal_raises(self) -> None:
+        with pytest.raises(ValueError, match="seasonal must be"):
+            ONTOLOGY.ces_series_id("IA", "Manufacturing", seasonal="X")
+
+    def test_invalid_datatype_raises(self) -> None:
+        with pytest.raises(ValueError, match="datatype must be 2 digits"):
+            ONTOLOGY.ces_series_id("IA", "Manufacturing", datatype="001")
+
+    def test_unknown_state_raises(self) -> None:
+        with pytest.raises(KeyError):
+            ONTOLOGY.ces_series_id("ZZ", "Manufacturing")
+
+
+class TestLausSeriesIdGeneration:
+    def test_labor_force_series_is_twenty_chars(self) -> None:
+        sid = ONTOLOGY.laus_series_id("IA", "Labor_Force")
+        assert sid == "LASST190000000000006"
+        assert len(sid) == 20
+
+    def test_round_trip_via_parser(self) -> None:
+        sid = ONTOLOGY.laus_series_id("OH", "Unemployment")
+        spec = ONTOLOGY.parse_series_id(sid)
+        assert spec.state.code == "OH"
+        assert spec.measure.key == "Unemployment"
+
+    def test_measure_without_laus_suffix_raises(self) -> None:
+        # LFPR is derived from LF / Population — no LAUS series for it.
+        with pytest.raises(ValueError, match="no LAUS suffix"):
+            ONTOLOGY.laus_series_id("IA", "LFPR")

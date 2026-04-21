@@ -35,10 +35,39 @@ MODEL_NAME = OLLAMA_MODEL
 LOCAL_EMBED_MODEL = "e5-small-v2"   
 
 # --- Data Pipeline Settings ---
-ALL_STATES = [
-    "IA", "IL", "IN", "KS", "MI", "MN",
-    "MO", "NE", "ND", "OH", "SD", "WI"
-]
+# States covered by the dashboard. The default (12 Midwest states) keeps
+# the cold-fetch cost bounded; override via environment to scale out:
+#
+#   STATE_SET=all_states        # 50 states + DC (no territories)
+#   STATE_SET=all_jurisdictions # above + PR/VI/GU/AS/MP territories
+#   STATE_SET=midwest           # legacy default
+#   STATES=IA,IL,CA,TX          # explicit comma-separated codes
+#
+# Anything else falls back to `midwest` with a warning at import.
+def _resolve_state_set() -> list[str]:
+    import os  # noqa: PLC0415
+    from utils.ontology import ONTOLOGY  # noqa: PLC0415
+
+    explicit = os.getenv("STATES", "").strip()
+    if explicit:
+        codes = [c.strip().upper() for c in explicit.split(",") if c.strip()]
+        # Silently drop unknown codes instead of crashing at import.
+        valid = [c for c in codes if c in ONTOLOGY.states]
+        if valid:
+            return valid
+
+    preset = os.getenv("STATE_SET", "midwest").strip().lower()
+    if preset == "all_jurisdictions":
+        return ONTOLOGY.state_codes()
+    if preset == "all_states":
+        return ONTOLOGY.state_codes(kinds=("state", "district"))
+    if preset == "midwest":
+        return ONTOLOGY.state_codes(regions=("Midwest",))
+    # Unknown preset → fall back.
+    return ONTOLOGY.state_codes(regions=("Midwest",))
+
+
+ALL_STATES = _resolve_state_set()
 
 START_YEAR = 1996
 END_YEAR   = 2024
