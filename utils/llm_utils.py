@@ -1,53 +1,61 @@
-import requests
+"""
+Backward-compatible facade over the blurb agent.
+
+``generate_insight`` is the function the Dash tabs have been calling
+since before the LangChain harness existed. It still works the same
+way — caller passes a prompt, gets a natural-language answer — but
+under the hood it now routes through :class:`BlurbAgent` so every
+path shares the same connection, system prompt, and timeout handling.
+"""
+from __future__ import annotations
+
+import logging
 from functools import lru_cache
 
-from utils.constants import (
-    OLLAMA_URL,
-    OLLAMA_API_PATH,
-    MODEL_NAME,
-    DEFAULT_TIMEOUT
-)
+from utils.agents import BlurbAgent, default_blurb_agent
+from utils.constants import DEFAULT_TIMEOUT  # noqa: F401 — kept for import compat
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_context(active_tab: str | None, prompt: str) -> str:
+    """Pull RAG context for the prompt, falling back silently on failure."""
+    try:
+        from utils.embeddings import get_relevant_context, retrieve_context  # noqa: PLC0415
+
+        if active_tab:
+            return (get_relevant_context(active_tab, top_k=3) or "").strip()
+        return (retrieve_context(prompt, top_k=3) or "").strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.info(f"[llm] RAG retrieval skipped: {exc}")
+        return ""
+
 
 @lru_cache(maxsize=256)
-def generate_insight(prompt: str, timeout: int = DEFAULT_TIMEOUT, active_tab: str = None) -> str:
+def _cached_invoke(key: tuple[str, str, str]) -> str:
     """
-    Retrieval-augmented chat: fetches top-3 context snippets (from data and documentation) for the active tab,
-    then calls Ollama with them as system context alongside the user prompt.
+    LRU cache keyed on (prompt, context, agent_model).
+
+    Tuple-keyed so identical prompts that retrieved different context
+    (e.g. the same question after the panel refreshed) are cached
+    separately.
     """
-    from utils.embeddings import retrieve_context, get_relevant_context
-
-
-    if active_tab:
-        context = get_relevant_context(active_tab, top_k=3)
-    else:
-        context = retrieve_context(prompt, top_k=3)
-    context = context.strip() if context else ""
-
-
-    system_msg = "You are a data assistant helping with Midwest BLS data."
-    if context:
-        system_msg += " Here is the relevant context:\n\n" + context
-    messages = [
-        {"role": "system", "content": system_msg},
-        {"role": "user", "content": prompt}
-    ]
-
-
-    payload = {"model": MODEL_NAME, "messages": messages}
-
+    prompt, context, _model = key
+    blurb: BlurbAgent = default_blurb_agent()
     try:
-        resp = requests.post(
-            f"{OLLAMA_URL.rstrip('/')}{OLLAMA_API_PATH}",
-            json=payload,
-            timeout=timeout
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        return blurb.context_answer(prompt, context=context) or "[AI] empty response"
+    except Exception as exc:  # noqa: BLE001 — surfaced back to the UI
+        logger.warning(f"[llm] generate_insight failed: {exc}")
+        return f"[AI] Error generating insight: {exc}"
 
-        choices = data.get("choices", [])
-        if not choices:
-            return "[AI] No response choices returned."
 
-        return choices[0].get("message", {}).get("content", "[AI] No content returned.")
-    except requests.RequestException as e:
-        return f"[AI] Error generating insight: {e}"
+def generate_insight(prompt: str, timeout: int | None = None, active_tab: str | None = None) -> str:
+    """
+    Public entry point used by the Dash tabs. Same signature as before;
+    returns the LLM response as a plain string.
+    """
+    context = _resolve_context(active_tab, prompt)
+    # Include the agent model in the cache key so a model swap via env
+    # triggers fresh generations without restarting the app.
+    blurb = default_blurb_agent()
+    return _cached_invoke((prompt, context, blurb.agent.model))

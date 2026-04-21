@@ -14,6 +14,7 @@ and ``invoke_with_tools(prompt)`` — the latter wires in LangChain's
 tool-calling loop once the fetch agents (Phase C5) come online.
 """
 from utils.agents.base import LaborAgent, LaborAgentConfig
+from utils.agents.blurb import BlurbAgent, default_blurb_agent
 from utils.agents.ollama import (
     AGENT_MODEL_ENV,
     CHAT_MODEL_ENV,
@@ -21,13 +22,17 @@ from utils.agents.ollama import (
     chat_agent,
     worker_agent,
 )
+from utils.agents.sentence_rag import SentenceRAGBuilder
 
 __all__ = [
     "AGENT_MODEL_ENV",
+    "BlurbAgent",
     "CHAT_MODEL_ENV",
     "LaborAgent",
     "LaborAgentConfig",
     "OLLAMA_BASE_URL",
+    "SentenceRAGBuilder",
     "chat_agent",
+    "default_blurb_agent",
     "worker_agent",
 ]
