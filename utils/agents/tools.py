@@ -147,37 +147,12 @@ ALL_TOOLS: tuple["BaseTool", ...] = (
 )
 
 
-def build_data_refresh_agent() -> "BaseTool":
+def build_data_refresh_agent() -> Any:
     """
-    Return an agent-callable front-end that binds the fetch tools to
-    the chat model. Only imported inside this function so tests that
-    don't need the LangGraph/Ollama stack can skip it.
-
-    Phase C5 surfaces the tools and the builder; wiring an actual
-    orchestration into a tab button is Phase F.
+    Return a ready-to-invoke DeepAgents-based orchestrator bound to
+    ``ALL_TOOLS`` and phi3 via ``utils.agents.deep``. Thin shim so
+    existing callers that used this function don't have to re-import.
     """
-    from langchain.agents import create_tool_calling_agent  # noqa: PLC0415
-    from langchain_core.prompts import ChatPromptTemplate  # noqa: PLC0415
-    from langchain.agents import AgentExecutor  # noqa: PLC0415
+    from utils.agents.deep import data_refresh_agent  # noqa: PLC0415
 
-    from utils.agents.ollama import chat_agent  # noqa: PLC0415
-
-    llm = chat_agent().agent if False else chat_agent()._get_llm()  # type: ignore[attr-defined]
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                "You are a data-refresh coordinator for a US labor-market "
-                "dashboard. You have tools that fetch BLS CES, BLS LAUS, "
-                "US Census population, ensure the merged panel is fresh, "
-                "and describe a raw series id. Always validate state codes "
-                "against the ontology. Prefer `ensure_merged_data` when the "
-                "caller just wants 'make sure the dashboard is up to date'. "
-                "Respond with the tool outputs, then a one-line summary.",
-            ),
-            ("human", "{input}"),
-            ("placeholder", "{agent_scratchpad}"),
-        ]
-    )
-    agent = create_tool_calling_agent(llm, list(ALL_TOOLS), prompt)
-    return AgentExecutor(agent=agent, tools=list(ALL_TOOLS), verbose=False)
+    return data_refresh_agent()

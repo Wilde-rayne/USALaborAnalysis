@@ -15,6 +15,11 @@ tool-calling loop once the fetch agents (Phase C5) come online.
 """
 from utils.agents.base import LaborAgent, LaborAgentConfig
 from utils.agents.blurb import BlurbAgent, default_blurb_agent
+from utils.agents.deep import (
+    DEFAULT_AGENT_MODEL_SPEC,
+    create_labor_deep_agent,
+    data_refresh_agent,
+)
 from utils.agents.ollama import (
     AGENT_MODEL_ENV,
     CHAT_MODEL_ENV,
@@ -28,11 +33,14 @@ __all__ = [
     "AGENT_MODEL_ENV",
     "BlurbAgent",
     "CHAT_MODEL_ENV",
+    "DEFAULT_AGENT_MODEL_SPEC",
     "LaborAgent",
     "LaborAgentConfig",
     "OLLAMA_BASE_URL",
     "SentenceRAGBuilder",
     "chat_agent",
+    "create_labor_deep_agent",
+    "data_refresh_agent",
     "default_blurb_agent",
     "worker_agent",
 ]

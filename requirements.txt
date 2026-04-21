@@ -25,6 +25,12 @@ langchain>=0.3,<0.4
 langchain-core>=0.3,<0.4
 langchain-ollama>=0.2,<0.4
 
+# LangChain DeepAgents — "agent" layer for phi3. Wraps LangGraph with
+# planning (write_todos), virtual filesystem, subagent spawning, and
+# interrupt-based human-in-the-loop. Used by the data-refresh agent and
+# any future multi-step orchestrators.
+deepagents>=0.2,<1.0
+
 # Distributed Processing
 pyspark>=3.5.1,<4.0.0
 
