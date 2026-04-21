@@ -236,6 +236,17 @@ SOURCES: tuple[DataSource, ...] = (
         api_available=True,
         description="Annual demographic + economic survey, state-level.",
     ),
+    DataSource(
+        "bea_regional",
+        "US Bureau of Economic Analysis — Regional Accounts",
+        "https://apps.bea.gov/regional/",
+        api_available=True,
+        description=(
+            "State-level annual personal income (SAINC1) and GDP by industry "
+            "(SAGDP2N), 1929–present. Per-capita figures are a strong "
+            "compositional counterweight to BLS headcount series."
+        ),
+    ),
 )
 
 

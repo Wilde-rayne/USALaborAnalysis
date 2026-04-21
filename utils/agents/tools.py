@@ -137,11 +137,32 @@ def describe_series(series_id: str) -> str:
     return ONTOLOGY.describe(series_id)
 
 
+@tool
+def fetch_bea_personal_income(states: list[str], start_year: int, end_year: int) -> str:
+    """
+    Download BEA SAINC1 per-capita personal income (annual, 1929+) for
+    the given states and years. Writes data/raw/bea/BEA_SAINC1_L3_<ST>.txt
+    files alongside BLS output. Requires the ``BEA_API_KEY`` env var;
+    register a free key at https://apps.bea.gov/API/signup/.
+    """
+    from utils.fetch_bea_data import fetch_bea_sainc1  # noqa: PLC0415
+
+    codes = _normalize_states(states)
+    _validate_year_range(start_year, end_year)
+    written = fetch_bea_sainc1(codes, start_year, end_year)
+    return (
+        f"Fetched BEA SAINC1 (per-capita personal income) for "
+        f"{len(codes)} state(s): {', '.join(codes)} "
+        f"over {start_year}-{end_year}; {written} rows written."
+    )
+
+
 #: The canonical toolbelt an orchestration agent gets by default.
 ALL_TOOLS: tuple["BaseTool", ...] = (
     fetch_bls_ces,
     fetch_bls_laus,
     fetch_census_population,
+    fetch_bea_personal_income,
     ensure_merged_data,
     describe_series,
 )

@@ -62,6 +62,8 @@ services:
       # Census key is required; `:?` makes compose fail fast if missing.
       BLS_API_KEY: "${BLS_API_KEY:-}"
       CENSUS_API_KEY: "${CENSUS_API_KEY:?CENSUS_API_KEY not set. Copy .env.example to .env and fill it in.}"
+      # Optional — only needed if the BEA fetch agent runs.
+      BEA_API_KEY: "${BEA_API_KEY:-}"
     depends_on:
       ollama:
         condition: service_healthy

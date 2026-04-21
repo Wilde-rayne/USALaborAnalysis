@@ -116,15 +116,17 @@ class TestCollectChunks:
         monkeypatch.setattr(emb_module, "MILESTONE_PATH", str(tmp_path / "none.md"))
 
         chunks = emb_module._collect_chunks()
-        # One sentence per metric in _RAG_METRICS that appears in the data:
-        # Labor_Force, LFPR, Population — 3 sentences.
+        # SentenceRAGBuilder emits one "fact" sentence per (state, year,
+        # metric-present-in-record). The sample record has Labor_Force,
+        # Population, AND LFPR → 3 sentences. Ranking/trend layers stay
+        # empty here (single state, single year).
         assert len(chunks) == 3
         assert any("labor force" in c.lower() for c in chunks)
-        assert any("lfpr" in c.lower() for c in chunks)
         assert any("population" in c.lower() for c in chunks)
-        # LFPR mean = (47.6 + 47.9) / 2 = 47.75
-        lfpr_line = next(c for c in chunks if "lfpr" in c.lower())
-        assert "47.8" in lfpr_line or "47.75" in lfpr_line
+        # LFPR → ontology label is "labor force participation rate".
+        lfpr_line = next(c for c in chunks if "participation rate" in c.lower())
+        # Monthly mean = (47.6 + 47.9) / 2 = 47.75; format spec "{:.1f}%" → 47.8.
+        assert "47.8" in lfpr_line
 
     def test_extracts_from_markdown_docs(
         self, emb_module, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

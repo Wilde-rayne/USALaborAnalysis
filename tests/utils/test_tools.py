@@ -24,13 +24,14 @@ from utils.agents import tools as tools_mod  # noqa: E402
 # Tool registry metadata
 # --------------------------------------------------------------------------
 class TestToolRegistry:
-    def test_exposes_five_tools_by_default(self) -> None:
-        assert len(tools_mod.ALL_TOOLS) == 5
+    def test_exposes_six_tools_by_default(self) -> None:
+        assert len(tools_mod.ALL_TOOLS) == 6
         names = {t.name for t in tools_mod.ALL_TOOLS}
         assert names == {
             "fetch_bls_ces",
             "fetch_bls_laus",
             "fetch_census_population",
+            "fetch_bea_personal_income",
             "ensure_merged_data",
             "describe_series",
         }
