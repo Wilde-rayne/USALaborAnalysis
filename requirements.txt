@@ -19,6 +19,12 @@ scipy>=1.11,<2.0
 sentence-transformers>=2.6.1,<3.0.0
 torch>=2.0.0,<3.0.0
 
+# LLM agent harness — langchain + Ollama binding.
+# Pinned to 0.3.x major because 0.2→0.3 changed a lot of public API.
+langchain>=0.3,<0.4
+langchain-core>=0.3,<0.4
+langchain-ollama>=0.2,<0.4
+
 # Distributed Processing
 pyspark>=3.5.1,<4.0.0
 
