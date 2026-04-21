@@ -1,3 +1,13 @@
+"""
+Labor Force Participation forecast tab.
+
+Runs a multi-model bakeoff (Naive / SeasonalNaive / ETS) per series
+through expanding-window backtesting, picks the winner by minimum
+out-of-sample RMSE, and displays the winning model's forecast
+alongside a selection-rationale table and statistical diagnostics.
+"""
+from __future__ import annotations
+
 import logging
 
 import pandas as pd
@@ -7,29 +17,22 @@ from dash.exceptions import PreventUpdate
 
 from utils.constants import ALL_STATES, MONTH_MAP  # noqa: F401 — re-exported usage
 from utils.data_pipeline import OUTPUT_JSON, ensure_data
+from utils.forecasting import ForecastResult, select_forecaster
 from utils.llm_utils import generate_insight
-from utils.model_utils import forecast_with_model, train_test_rnn
 
 logger = logging.getLogger(__name__)
 
-# Cache keyed by horizon (years). On cache miss the callback trains lazily
-# rather than raising PreventUpdate, so horizons that the startup preloader
-# didn't touch still produce a forecast on first click.
-lfp_model_cache: dict[int, dict[str, dict]] = {}
+# Per-horizon cache. Value: {col_name: ForecastResult} so the winning
+# model (refit on the full series) is reused across clicks, and the
+# candidate metrics / diagnostics flow straight to the rationale panel.
+lfp_model_cache: dict[int, dict[str, ForecastResult]] = {}
 
 IA_COL = "IA_Labor_Force_Participation_Rate"
 MIDWEST_COL = "Midwest_LFPR"
 
 
 def _load_lfp_panel() -> pd.DataFrame:
-    """
-    Lazy-load the merged panel and derive Midwest_LFPR.
-
-    The raw panel is keyed by (state, year, month) so each date has 12
-    rows — one per state — carrying identical values in every wide
-    column. We drop those duplicates so downstream time-series code
-    (``asfreq('MS')``, LSTM training) sees a monotone date index.
-    """
+    """Lazy-load the merged panel, derive Midwest_LFPR, dedupe by date."""
     ensure_data()  # no-op if cache is fresh
     df = pd.read_json(OUTPUT_JSON, orient="records")
     df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
@@ -47,47 +50,118 @@ def _load_lfp_panel() -> pd.DataFrame:
     return df
 
 
-def _get_or_train_lfp(years_ahead: int, df: pd.DataFrame) -> dict[str, dict]:
-    """Return cached LFP models for the horizon or train and cache them."""
+def _get_or_train_lfp(years_ahead: int, df: pd.DataFrame) -> dict[str, ForecastResult]:
+    """Return cached per-series ForecastResults for the horizon or run the bakeoff."""
     if years_ahead in lfp_model_cache:
         return lfp_model_cache[years_ahead]
 
-    logger.info(f"[LFP] Cache miss for horizon={years_ahead}y — training on demand")
+    horizon = years_ahead * 12
+    logger.info(f"[LFP] Cache miss horizon={years_ahead}y — running bakeoff")
     base = df[["date", IA_COL, MIDWEST_COL]].dropna()
-    entry: dict[str, dict] = {}
+    entry: dict[str, ForecastResult] = {}
     for col in (IA_COL, MIDWEST_COL):
-        model, metrics, last_window = train_test_rnn(base[["date", col]], col)
-        entry[col] = {"model": model, "metrics": metrics, "last_window": last_window}
+        y = base[col].astype(float).to_numpy()
+        dates = base["date"].to_numpy()
+        result = select_forecaster(y, dates=dates, horizon=horizon, n_folds=3)
+        logger.info(
+            f"[LFP] {col}: winner={result.name} "
+            f"rmse={result.metrics.rmse:.3f} mae={result.metrics.mae:.3f}"
+        )
+        entry[col] = result
     lfp_model_cache[years_ahead] = entry
     return entry
 
 
-def render_layout():
-    return html.Div([
-        html.H5("Labor Force Participation Forecast"),
-        html.Div([
-            html.Label("Years Ahead:"),
-            dcc.Slider(
-                id="lfp-years-slider",
-                min=1, max=5, step=1,
-                marks={i: str(i) for i in range(1, 6)},
-                value=2,
-            ),
-            html.Button("Run Forecast", id="lfp-run", className="mt-2 btn btn-primary"),
-        ], className="mb-3"),
-        html.Div(id="lfp-output"),
+def _model_rationale_table(col_label: str, result: ForecastResult) -> html.Div:
+    """Compact table showing every candidate's fold-averaged metrics."""
+    rows = []
+    for m in sorted(result.candidates, key=lambda x: x.rmse):
+        is_winner = m.model == result.name
+        cells = [
+            html.Td(("★ " if is_winner else "") + m.model),
+            html.Td(f"{m.rmse:.3f}"),
+            html.Td(f"{m.mae:.3f}"),
+            html.Td(f"{m.mape:.2f}%" if m.mape == m.mape else "—"),
+            html.Td(f"{m.bias:+.3f}"),
+        ]
+        rows.append(html.Tr(cells, style={"fontWeight": "bold"} if is_winner else {}))
 
-        html.Hr(),
-        html.H6("Ask the AI Assistant"),
-        dcc.Input(
-            id="lfp-chat-input",
-            type="text",
-            placeholder="Ask a question about the forecast...",
-            style={"width": "80%"}
-        ),
-        html.Button("Submit", id="lfp-chat-button", className="btn btn-outline-primary btn-sm ml-2"),
-        html.Div(id="lfp-chat-output", className="mt-3"),
-    ])
+    d = result.diagnostics
+
+    def _fmt_p(p):
+        return "—" if p is None else f"{p:.3f}"
+
+    return html.Div(
+        [
+            html.H6(f"Model selection — {col_label}"),
+            html.Table(
+                [
+                    html.Thead(
+                        html.Tr([html.Th(c) for c in ("Model", "RMSE", "MAE", "MAPE", "Bias")])
+                    ),
+                    html.Tbody(rows),
+                ],
+                className="table table-sm table-striped mb-2",
+            ),
+            html.Div(
+                [
+                    html.Small(
+                        f"Diagnostics — ADF p={_fmt_p(d.adf_pvalue)} · "
+                        f"KPSS p={_fmt_p(d.kpss_pvalue)} · "
+                        f"Ljung-Box p={_fmt_p(d.ljungbox_pvalue)} · "
+                        f"Jarque-Bera p={_fmt_p(d.jarquebera_pvalue)} · "
+                        f"Diebold-Mariano p={_fmt_p(d.dm_pvalue_vs_baseline)} "
+                        "(vs naive; negative DM stat ⇒ winner beats baseline)",
+                        className="text-muted",
+                    ),
+                ],
+                className="mb-3",
+            ),
+        ]
+    )
+
+
+def render_layout():
+    return html.Div(
+        [
+            html.H5("Labor Force Participation Forecast"),
+            html.P(
+                "Each run fits Naive, Seasonal-Naive, and Holt-Winters (ETS) "
+                "through a 3-fold expanding-window backtest, then picks the "
+                "model with the lowest out-of-sample RMSE and reports its "
+                "stationarity and residual diagnostics alongside the chart.",
+                className="text-muted small",
+            ),
+            html.Div(
+                [
+                    html.Label("Years Ahead:"),
+                    dcc.Slider(
+                        id="lfp-years-slider",
+                        min=1,
+                        max=5,
+                        step=1,
+                        marks={i: str(i) for i in range(1, 6)},
+                        value=2,
+                    ),
+                    html.Button("Run Forecast", id="lfp-run", className="mt-2 btn btn-primary"),
+                ],
+                className="mb-3",
+            ),
+            dcc.Loading(id="loading-lfp", children=html.Div(id="lfp-output")),
+            html.Hr(),
+            html.H6("Ask the AI Assistant"),
+            dcc.Input(
+                id="lfp-chat-input",
+                type="text",
+                placeholder="Ask a question about the forecast...",
+                style={"width": "80%"},
+            ),
+            html.Button(
+                "Submit", id="lfp-chat-button", className="btn btn-outline-primary btn-sm ml-2"
+            ),
+            html.Div(id="lfp-chat-output", className="mt-3"),
+        ]
+    )
 
 
 def register_callbacks(app):
@@ -97,7 +171,6 @@ def register_callbacks(app):
         State("lfp-years-slider", "value"),
     )
     def update_lfp(n_clicks, years_ahead):
-        # Train on demand if the cache doesn't already have this horizon.
         if not n_clicks:
             raise PreventUpdate
 
@@ -107,24 +180,36 @@ def register_callbacks(app):
         combo[MIDWEST_COL] = combo[MIDWEST_COL].astype(float)
 
         entry = _get_or_train_lfp(years_ahead, df)
-        ia_m = entry[IA_COL]["model"]
-        ia_w = entry[IA_COL]["last_window"]
-        mw_m = entry[MIDWEST_COL]["model"]
-        mw_w = entry[MIDWEST_COL]["last_window"]
+        ia_result = entry[IA_COL]
+        mw_result = entry[MIDWEST_COL]
 
         months = years_ahead * 12
-        preds_ia = forecast_with_model(ia_m, ia_w, months)
-        preds_mw = forecast_with_model(mw_m, mw_w, months)
+        preds_ia = ia_result.model.predict(months)
+        preds_mw = mw_result.model.predict(months)
 
         last_date = combo["date"].max()
         dates = [last_date + pd.DateOffset(months=i + 1) for i in range(months)]
 
-        fig = go.Figure([
-            go.Scatter(x=combo["date"], y=combo[IA_COL], mode="lines", name="Iowa Historic"),
-            go.Scatter(x=combo["date"], y=combo[MIDWEST_COL], mode="lines", name="Midwest Historic"),
-            go.Scatter(x=dates, y=preds_ia, mode="lines+markers", name="Iowa Forecast"),
-            go.Scatter(x=dates, y=preds_mw, mode="lines+markers", name="Midwest Forecast"),
-        ])
+        fig = go.Figure(
+            [
+                go.Scatter(x=combo["date"], y=combo[IA_COL], mode="lines", name="Iowa Historic"),
+                go.Scatter(
+                    x=combo["date"], y=combo[MIDWEST_COL], mode="lines", name="Midwest Historic"
+                ),
+                go.Scatter(
+                    x=dates,
+                    y=preds_ia,
+                    mode="lines+markers",
+                    name=f"Iowa Forecast ({ia_result.name})",
+                ),
+                go.Scatter(
+                    x=dates,
+                    y=preds_mw,
+                    mode="lines+markers",
+                    name=f"Midwest Forecast ({mw_result.name})",
+                ),
+            ]
+        )
         fig.update_layout(
             title=f"LFP Forecast (+{years_ahead} yrs)",
             xaxis_title="Date",
@@ -132,22 +217,24 @@ def register_callbacks(app):
             template="plotly_white",
         )
 
-        if preds_ia and preds_mw:
-            ia_final, mw_final = preds_ia[-1], preds_mw[-1]
-            prompt = (
-                f"Iowa forecast: {ia_final:.1f}% vs. Midwest: {mw_final:.1f}% "
-                f"over {years_ahead} years. Provide 3–4 sentences of economic insight."
-            )
-            insight = generate_insight(prompt)
-        else:
-            insight = "Not enough data to generate a forecast."
+        prompt = (
+            f"Iowa LFPR forecast: {preds_ia[-1]:.1f}% (model={ia_result.name}); "
+            f"Midwest LFPR forecast: {preds_mw[-1]:.1f}% (model={mw_result.name}); "
+            f"over {years_ahead} years. Provide 3–4 sentences of economic insight."
+        )
+        insight = generate_insight(prompt)
 
-        return html.Div([
-            dcc.Graph(figure=fig),
-            html.Hr(),
-            dcc.Markdown(insight),
-            dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
-        ])
+        return html.Div(
+            [
+                dcc.Graph(figure=fig),
+                html.Hr(),
+                _model_rationale_table("Iowa", ia_result),
+                _model_rationale_table("Midwest mean", mw_result),
+                html.Hr(),
+                dcc.Markdown(insight),
+                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
+            ]
+        )
 
     @app.callback(
         Output("lfp-chat-output", "children"),
@@ -158,7 +245,9 @@ def register_callbacks(app):
         if not n_clicks or not query:
             raise PreventUpdate
         answer = generate_insight(query)
-        return html.Div([
-            dcc.Markdown(answer),
-            dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
-        ])
+        return html.Div(
+            [
+                dcc.Markdown(answer),
+                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
+            ]
+        )

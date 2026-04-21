@@ -42,7 +42,12 @@ services:
     environment:
       OLLAMA_URL: "http://ollama:11434"           # Ollama API base URL for chat
       OLLAMA_API_PATH: "/v1/chat/completions"     # Chat endpoint path
-      OLLAMA_MODEL: "llama2:chat"
+      # Two-model setup: a fast 3B for the user-facing chat, and phi3 for
+      # internal agents (summarization, blurb generation, sentence-RAG
+      # preprocessing). Both run on CPU in reasonable time; llama2:chat
+      # was kept behind at 7B and the 180 s default timeout was hitting it.
+      OLLAMA_MODEL: "llama3.2:3b"
+      OLLAMA_AGENT_MODEL: "phi3"
       PYSPARK_PYTHON: /usr/local/bin/python3
       PYSPARK_DRIVER_PYTHON: /usr/local/bin/python3
       # Reactive-startup control; see .env.example for the full enum.

@@ -271,18 +271,30 @@ class LSTMForecaster(BaseForecaster):
 # --------------------------------------------------------------------------
 # Default candidate set
 # --------------------------------------------------------------------------
-def default_candidates(seasonal_periods: int = 12) -> list[BaseForecaster]:
+def default_candidates(
+    seasonal_periods: int = 12, *, include_lstm: bool = False
+) -> list[BaseForecaster]:
     """
-    Build the default bakeoff line-up. Kept as a function (not a module-
-    level constant) because each selector call needs fresh instances —
-    these models keep fitted state on ``self``.
+    Build the default bakeoff line-up.
+
+    Kept as a function (not a module-level constant) because each
+    selector call needs fresh instances — these models keep fitted
+    state on ``self``.
+
+    LSTM is excluded by default: on this project's ~300-obs monthly
+    series it fits in ~8 s per fold (so ~25 s for a 3-fold backtest,
+    dominating wall-time) and rarely beats Holt-Winters in out-of-
+    sample error. Pass ``include_lstm=True`` for the full slate when
+    deep-learning comparability is part of the deliverable.
     """
-    return [
+    candidates: list[BaseForecaster] = [
         NaiveForecaster(),
         SeasonalNaiveForecaster(season=seasonal_periods),
         ETSForecaster(seasonal_periods=seasonal_periods),
-        LSTMForecaster(window=seasonal_periods),
     ]
+    if include_lstm:
+        candidates.append(LSTMForecaster(window=seasonal_periods))
+    return candidates
 
 
 #: Read-only tuple of the built-in candidate classes, for discoverability.
