@@ -5,11 +5,15 @@ plotly>=5.20.0,<6.0.0
 gunicorn>=21.2.0,<22.0.0
 
 # Data Science
-numpy>=1.26.4,<2.0.0
+numpy>=1.26.4,<3.0.0
 pandas>=2.2.2,<3.0.0
 scikit-learn>=1.4.2,<2.0.0
 tqdm>=4.66.2,<5.0.0
 tensorflow>=2.16.1,<3.0.0
+
+# Statistical modeling & diagnostics (ETS, ARIMA, ADF/KPSS/LB/JB/DM tests)
+statsmodels>=0.14,<0.15
+scipy>=1.11,<2.0
 
 # Machine Learning
 sentence-transformers>=2.6.1,<3.0.0
