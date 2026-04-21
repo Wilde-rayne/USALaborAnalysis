@@ -151,59 +151,23 @@ def preprocess_for_embedding(text: str, context_prefix: str = "In") -> List[str]
     return out
 
 
-# Metrics worth embedding: the narrative layer for the chat. Everything
-# else on the panel (per-state sector columns, etc.) blows the chunk
-# count into the hundreds of thousands without adding discriminating
-# signal for retrieval. Adjust this tuple if the assistant needs to
-# answer questions about a new dimension.
-_RAG_METRICS: tuple[str, ...] = (
-    "Labor_Force",
-    "Employment",
-    "Unemployment",
-    "LFPR",
-    "Population",
-)
-
-
 def _chunks_from_records(records: Iterable[dict]) -> Iterable[str]:
     """
-    Collapse the monthly panel into one sentence per (state, year, metric).
+    Turn the monthly panel into RAG-ready sentences via
+    :class:`utils.agents.sentence_rag.SentenceRAGBuilder`.
 
-    The raw panel is ~4k rows × 200 wide columns; naive per-row encoding
-    produces ~700k chunks which is both slow to embed and poor signal —
-    most of those columns repeat information across states. Aggregating
-    to an annual mean per metric yields ~12 states × 30 years × 5
-    metrics ≈ 1.8k sentences that are readable by the chat model and
-    cheap to retrieve.
+    The builder emits three layers — deterministic facts, ontology-
+    enriched per-state rankings, and per-(state, metric) trend
+    summaries — all without calling the LLM on the default path. The
+    optional ``polish=True`` flag routes each sentence through the
+    worker agent (phi3 by default) and is off here because embedding
+    rebuilds should be cheap.
     """
-    from collections import defaultdict
+    from utils.agents.sentence_rag import SentenceRAGBuilder  # noqa: PLC0415
 
-    agg: dict[tuple[str, int], dict[str, list[float]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    for rec in records:
-        state = rec.get("state")
-        year = rec.get("year")
-        if not state or year is None:
-            continue
-        for metric in _RAG_METRICS:
-            val = rec.get(metric)
-            if val is None:
-                continue
-            try:
-                agg[(state, int(year))][metric].append(float(val))
-            except (TypeError, ValueError):
-                continue
-
-    for (state, year), metrics in sorted(agg.items()):
-        for metric in _RAG_METRICS:
-            values = metrics.get(metric)
-            if not values:
-                continue
-            avg = sum(values) / len(values)
-            readable = metric.replace("_", " ").lower()
-            sentence = f"In {year}, {state} {readable} averaged {avg:,.1f}."
-            yield from _split_text_into_chunks(sentence)
+    builder = SentenceRAGBuilder()
+    for sentence in builder.build_corpus(records):
+        yield from _split_text_into_chunks(sentence)
 
 
 def _chunks_from_doc(path: str) -> Iterable[str]:
