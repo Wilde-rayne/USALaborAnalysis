@@ -80,53 +80,68 @@ def ensure_data(
         f"for {len(states)} states"
     )
     refresh_all(states, start_year, end_year)
+
+    # Invalidate the LRU cache in llm_utils so any question whose answer
+    # was computed against the old corpus doesn't stick around. Wrapped
+    # in a lazy try/except so this module stays free of an import cycle
+    # and works even if llm_utils hasn't been loaded yet.
+    try:
+        from utils import llm_utils as _llm  # noqa: PLC0415
+
+        _llm._cached_invoke.cache_clear()
+    except Exception:  # noqa: BLE001
+        pass
+
     return OUTPUT_JSON
 
-def validate_lfpr_data(df: pd.DataFrame, states: list[str], start_year: int, end_year: int):
+def validate_lfpr_data(
+    df: pd.DataFrame,
+    states: list[str],
+    start_year: int,
+    end_year: int,
+) -> dict[str, dict[int, list[int]]]:
     """
-    Validates that each state has complete monthly LFPR data.
-    Logs a warning if any (state, year, month) entry is missing.
+    Report which ``{state}_Labor_Force_Participation_Rate`` wide-column
+    observations are missing across the requested span.
+
+    Returns a ``{state: {year: [missing_month_ints]}}`` dict and emits a
+    ``WARNING`` log line listing the gaps. Callers can branch on a
+    truthy return value to signal to the UI that a refresh is worth
+    running. Uses the integer ``month`` column the merger now produces,
+    not the old "period == 'January'" string shape.
     """
-    months = [
-        "January","February","March","April","May","June",
-        "July","August","September","October","November","December"
-    ]
-    issues: dict[str, dict[int, list[str]]] = {}
+    issues: dict[str, dict[int, list[int]]] = {}
+    year_range = range(start_year, end_year + 1)
+    month_range = range(1, 13)
+    panel = df.drop_duplicates(subset="date") if "date" in df.columns else df
     for state in states:
         col = f"{state}_Labor_Force_Participation_Rate"
-        if col not in df.columns:
-            issues[state] = {year: months[:] for year in range(start_year, end_year + 1)}
+        if col not in panel.columns:
+            issues[state] = {yr: list(month_range) for yr in year_range}
             continue
 
-        present: set[tuple[int, str]] = set()
-        for _, row in df.iterrows():
-            year = int(row["year"])
-            period = row["period"]
-            value = row.get(col)
-            if period == "Annual":
-                continue
-            if pd.notna(value):
-                present.add((year, period))
-
-        expected = {(yr, month) for yr in range(start_year, end_year + 1) for month in months}
+        mask = panel[col].notna()
+        present: set[tuple[int, int]] = {
+            (int(y), int(m))
+            for y, m in zip(panel.loc[mask, "year"], panel.loc[mask, "month"])
+        }
+        expected = {(yr, m) for yr in year_range for m in month_range}
         missing = sorted(expected - present)
         if missing:
-            missing_by_year: dict[int, list[str]] = {}
-            for yr, month in missing:
-                missing_by_year.setdefault(yr, []).append(month)
-            issues[state] = missing_by_year
+            gaps: dict[int, list[int]] = {}
+            for yr, m in missing:
+                gaps.setdefault(yr, []).append(m)
+            issues[state] = gaps
 
     if issues:
-        msg_lines = []
-        for state, missing_info in issues.items():
-            for yr, months_missing in missing_info.items():
-                months_str = ", ".join(months_missing)
-                msg_lines.append(f"{state}: missing {months_str} in {yr}")
-        msg = (
-            "Incomplete Labor_Force_Participation_Rate data for the following states:\n"
-            + "\n".join(msg_lines)
-        )
-        logger.warning(msg)
+        lines = [
+            f"{st}: missing {sum(len(ms) for ms in gaps.values())} months "
+            f"across {len(gaps)} year(s)"
+            for st, gaps in issues.items()
+        ]
+        logger.warning("[LFPR-validate] gaps — " + "; ".join(lines))
+    return issues
+
 
 def refresh_all(states: list[str], start_year: int, end_year: int):
     """

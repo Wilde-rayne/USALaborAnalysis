@@ -6,61 +6,69 @@ An interactive dashboard analyzing labor and employment trends in Iowa and the b
 
 ## 🚀 Project Overview
 
-- **Data sources**  
-  - **CES** (Current Employment Statistics): industry‐level employment counts  
-  - **LAUS** (Local Area Unemployment Statistics): unemployment rates & labor force metrics  
-- **Forecasting**  
-  - LSTM RNN models (12-month windows, 75/25 split, 10 epochs, batch size 16)  
-- **Embeddings & AI**  
-  - Contextual snippets embedded via **Sentence-Transformers** (`intfloat/e5-small-v2`)  
-  - **Apache Spark** parallelizes embedding of ~3k snippets at container startup  
-  - Local LLM (Ollama “llama2:chat”) generates narrative insights  
+- **Data sources (multi-source fetch agents, all free with a key)**
+  - **BLS CES** — state-level employment by supersector (SM series)
+  - **BLS LAUS** — labor force, employment, unemployment, unemployment rate
+  - **US Census** — ACS + PEP population estimates
+  - **BEA** — state annual personal income (SAINC1)
+  - **FRED** — state macro indicators (UR, PI, NGSP, …) via `{ST}{IND}` naming
+- **Forecasting — multi-model bakeoff, not a single architecture**
+  - Candidate set: Naive, Seasonal-Naive, Holt-Winters ETS (LSTM opt-in)
+  - Expanding-window backtest picks the lowest-RMSE model per series
+  - Per-forecast diagnostics: ADF / KPSS / Ljung-Box / Jarque-Bera /
+    Diebold-Mariano (with HLN small-sample correction) vs. Naive baseline
+- **LLM layer — LangChain + Ollama**
+  - Chat / blurbs: `llama3.2:3b` via `ChatOllama`
+  - Background agents: `phi3` via `deepagents.create_deep_agent`
+  - Sentence-RAG corpus built deterministically from an ontology of
+    states × supersectors × measures — no tabular blobs in embeddings
+  - Embeddings: `intfloat/e5-small-v2` (in-process PyTorch, no Spark)  
 
 ---
 
 ## 📁 Directory Structure
 
 ```
-ds4010/
-├── assets/  
-│   └── bootstrap.min.css  
-├── img/ ← contains reference images for .md files
-├── data/  
-│   ├── raw/  
-│   │   ├── ces/  
-│   │   ├── laus/  
-│   │   ├── METADATA.md  
-│   │   └── README.md  
-│   ├── all_data.json  
-│   ├── METADATA.md  
-│   └── README.md  
-├── tabs/  
-│   ├── about_tab.py  
-│   ├── eda_tab.py  
-│   ├── lfp_tab.py  
-│   └── super_tab.py  
-├── utils/  
-│   ├── constants.py  
-│   ├── data_pipeline.py  
-│   ├── embeddings.py  
-│   ├── fetch_ces_data.py  
-│   ├── fetch_laus_data.py
-│   ├── fetch_population_data.py  
-│   ├── graphics.py    
-│   ├── merge_all_data.py  
-│   ├── llm_utils.py  
-│   └── model_utils.py  
-├── .gitignore  
-├── app.py  
-├── deploy.sh                ← supports `--full` and `--dev` (hot reload) 
-├── build.sh                 ← Makes .md into a pdf 
-├── docker-compose.yml       ← prod & dev volumes + hot-reload bind mounts  
-├── Dockerfile.dashboard  
-├── Dockerfile.ollama  
-├── MILESTONE.md  
-├── README.md 
-├── REPORT.md  
-└── requirements.txt  
+USALaborAnalysis/
+├── app.py                            ← Dash entry + /health + preload
+├── assets/                           ← CSS, design tokens
+├── data/                             ← cached output (.gitignored except configs)
+│   ├── ces_state_sms_codes.json
+│   ├── laus_state_codes.json
+│   └── raw/                          ← per-source BLS/Census/BEA/FRED TXTs
+├── tabs/
+│   ├── about_tab.py                  ← this page, plus source catalog
+│   ├── eda_tab.py                    ← exploratory data analysis
+│   ├── lfp_tab.py                    ← LFP forecast (trend-heavy)
+│   └── super_tab.py                  ← supersector forecast + site selection
+├── utils/
+│   ├── agents/                       ← LangChain + DeepAgents harness
+│   │   ├── base.py                   ← LaborAgent + LaborAgentConfig
+│   │   ├── blurb.py                  ← BlurbAgent — narrative blurbs
+│   │   ├── deep.py                   ← DeepAgents data-refresh agent (phi3)
+│   │   ├── ollama.py                 ← chat_agent / worker_agent factories
+│   │   ├── sentence_rag.py           ← ontology-enriched RAG corpus
+│   │   └── tools.py                  ← @tool fetch wrappers for the agent
+│   ├── forecasting/                  ← multi-model bakeoff framework
+│   │   ├── base.py                   ← BaseForecaster + metric/diagnostic types
+│   │   ├── models.py                 ← Naive / SeasonalNaive / ETS / LSTM
+│   │   ├── selection.py              ← expanding-window backtest + selector
+│   │   ├── diagnostics.py            ← ADF / KPSS / Ljung-Box / JB / DM
+│   │   └── trend.py                  ← trend summaries + rolling stats
+│   ├── constants.py                  ← env-driven STATE_SET resolution
+│   ├── data_pipeline.py              ← ensure_data cache + refresh_all
+│   ├── embeddings.py                 ← e5-small-v2 in-process
+│   ├── fetch_{bea,ces,laus,population,fred}_data.py
+│   ├── llm_utils.py                  ← BlurbAgent-backed generate_insight
+│   ├── merge_all_data.py             ← long + wide panel construction
+│   └── ontology.py                   ← states × supersectors × measures
+├── tests/
+│   ├── test_smoke.py
+│   └── utils/                        ← 15 test files, 230+ cases
+├── docker-compose.yml                ← ollama + dashboard services
+├── Dockerfile.dashboard
+├── deploy.sh                         ← --full / --dev modes
+└── requirements.txt / requirements-test.txt / pyproject.toml
 ```
 
 ---

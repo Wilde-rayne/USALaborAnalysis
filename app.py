@@ -82,40 +82,59 @@ def _load_panel_df():
 
 
 def _preload_lfp_models(df) -> None:
-    """Train the 10 LFP LSTM models (IA + Midwest × 5 horizons). ~1 min."""
-    from tabs.lfp_tab import lfp_model_cache
-    from utils.model_utils import train_test_rnn
+    """
+    Run the LFP bakeoff over the 5 horizons × 2 series (IA + Midwest).
 
-    ia_col = "IA_Labor_Force_Participation_Rate"
+    Populates ``tabs.lfp_tab.lfp_model_cache`` with ``ForecastResult``
+    objects keyed by horizon so the first click after startup hits a
+    fully-fit winner instead of running the backtest inline.
+    """
+    from tabs.lfp_tab import IA_COL, MIDWEST_COL, lfp_model_cache
+    from utils.forecasting import select_forecaster
+
     lfp_cols = [c for c in df.columns if c.endswith("_Labor_Force_Participation_Rate")]
-    df["Midwest_LFPR"] = df[lfp_cols].mean(axis=1, skipna=True)
-    base = df[["date", ia_col, "Midwest_LFPR"]].dropna()
+    df[MIDWEST_COL] = df[lfp_cols].mean(axis=1, skipna=True)
+    base = df[["date", IA_COL, MIDWEST_COL]].dropna()
 
     for years in range(1, 6):
-        entry = {}
-        for col in [ia_col, "Midwest_LFPR"]:
-            model, metrics, last_window = train_test_rnn(base[["date", col]], col)
-            entry[col] = {"model": model, "metrics": metrics, "last_window": last_window}
+        entry: dict = {}
+        for col in (IA_COL, MIDWEST_COL):
+            y = base[col].astype(float).to_numpy()
+            dates = base["date"].to_numpy()
+            entry[col] = select_forecaster(y, dates=dates, horizon=years * 12, n_folds=3)
         lfp_model_cache[years] = entry
 
 
 def _preload_supersector_models(df) -> None:
-    """Train 9 × 5 × 12 = 540 LSTM models. Slow (~45 min). 'full' scope only."""
+    """
+    Run the supersector bakeoff over every (sector, horizon, state) cell.
+
+    With the default Naive/SeasonalNaive/ETS candidate set each cell
+    takes ~3s; 9 sectors × 5 horizons × 12 states × 3s ≈ 27 min on
+    one CPU. Only runs under PRELOAD_SCOPE=full; otherwise the tabs
+    fill the cache lazily on click.
+    """
     from tabs.super_tab import SUPERSECTORS, supersector_model_cache
-    from utils.model_utils import train_test_rnn
+    from utils.forecasting import select_forecaster
 
     for sector in SUPERSECTORS:
         for years in range(1, 6):
-            entry = {}
+            entry: dict = {}
             for st in ALL_STATES:
                 col = f"{st}_{sector}"
+                if col not in df.columns:
+                    continue
                 sub = df[["date", col]].dropna()
-                model, metrics, last_window = train_test_rnn(sub, col)
-                entry[st] = {
-                    "model": model,
-                    "metrics": metrics,
-                    "last_window": last_window,
-                }
+                if sub.empty:
+                    continue
+                y = sub[col].astype(float).to_numpy()
+                dates = sub["date"].to_numpy()
+                try:
+                    entry[st] = select_forecaster(
+                        y, dates=dates, horizon=years * 12, n_folds=3
+                    )
+                except RuntimeError:
+                    continue  # every candidate failed — skip this state
             supersector_model_cache[(sector, years)] = entry
 
 
@@ -177,9 +196,33 @@ tabs = {
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    suppress_callback_exceptions=True
+    suppress_callback_exceptions=True,
+    # Standard meta tags for small-screen legibility and browser
+    # dark-mode preference pickup.
+    meta_tags=[
+        {"name": "viewport", "content": "width=device-width, initial-scale=1"},
+        {"name": "color-scheme", "content": "light dark"},
+    ],
 )
 server = app.server
+
+
+# Real health endpoint for the docker-compose healthcheck.
+# Previously the compose file hit /health and relied on `|| exit 1` to
+# mask the 404 from a missing route, which meant an unhealthy process
+# could still look healthy. Returning a 200 with preload status lets
+# external monitors (load balancers, CI smoke) actually sample liveness.
+@server.route("/health")
+def _health():  # noqa: D401 — Flask handler
+    """Return preload status and a 200/503 based on readiness."""
+    from utils import preload_state as _ps  # noqa: PLC0415
+
+    ready = _ps.preload_completed_at is not None
+    body = {
+        "status": "healthy" if ready else "starting",
+        "preload_completed_at": _ps.preload_completed_at,
+    }
+    return body, (200 if ready else 503)
 
 app.layout = html.Div([
     dbc.NavbarSimple("Prairie Insights: Midwest Labor Dashboard",
