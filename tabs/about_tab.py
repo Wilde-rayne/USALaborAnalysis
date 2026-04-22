@@ -166,12 +166,16 @@ def render_layout():
             ),
             html.Hr(),
             html.H6("Ask the AI Assistant"),
+            html.Label(
+                "Your question",
+                htmlFor="about-chat-input",
+                className="visually-hidden",
+            ),
             dcc.Input(
                 id="about-chat-input",
                 type="text",
                 placeholder="Ask about the data, forecasts, or architecture…",
                 style={"width": "80%"},
-                **{"aria-label": "About-tab chat input"},
             ),
             html.Button(
                 "Submit",
