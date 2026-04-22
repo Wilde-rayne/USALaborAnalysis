@@ -260,6 +260,19 @@ SOURCES: tuple[DataSource, ...] = (
             "recommendations."
         ),
     ),
+    DataSource(
+        "bls_cpi",
+        "BLS Consumer Price Index — regional",
+        "https://www.bls.gov/cpi/",
+        api_available=True,
+        description=(
+            "Monthly CPI-U indices for the 4 Census regions (Northeast, "
+            "Midwest, South, West) plus the US city average. Used to "
+            "deflate dollar-denominated series to real terms — the "
+            "missing context when comparing 1996-vintage payroll counts "
+            "against 2024-vintage ones."
+        ),
+    ),
 )
 
 

@@ -158,6 +158,35 @@ def fetch_bea_personal_income(states: list[str], start_year: int, end_year: int)
 
 
 @tool
+def fetch_bls_regional_cpi(
+    regions: list[str] | None, start_year: int, end_year: int
+) -> str:
+    """
+    Download BLS CPI-U (Consumer Price Index, all items) for the four
+    Census regions (Northeast / Midwest / South / West) + US city
+    average. Pass ``None`` or an empty list to fetch all five. Uses
+    the existing BLS_API_KEY; no additional signup required.
+    """
+    from utils.fetch_cpi_data import CPI_REGIONS, fetch_cpi_regional  # noqa: PLC0415
+
+    if not regions:
+        regions = list(CPI_REGIONS.keys())
+    bad = [r for r in regions if r not in CPI_REGIONS]
+    if bad:
+        raise ValueError(
+            f"unknown CPI region codes: {bad}; allowed: "
+            f"{sorted(CPI_REGIONS)}"
+        )
+    _validate_year_range(start_year, end_year)
+    written = fetch_cpi_regional(regions, start_year, end_year)
+    labels = ", ".join(CPI_REGIONS[r][0] for r in regions)
+    return (
+        f"Fetched BLS CPI-U for regions [{labels}] "
+        f"{start_year}-{end_year}; {written} rows written."
+    )
+
+
+@tool
 def fetch_fred_state_indicator(
     states: list[str], indicator: str, start_year: int, end_year: int
 ) -> str:
@@ -197,6 +226,7 @@ ALL_TOOLS: tuple["BaseTool", ...] = (
     fetch_census_population,
     fetch_bea_personal_income,
     fetch_fred_state_indicator,
+    fetch_bls_regional_cpi,
     ensure_merged_data,
     describe_series,
 )
