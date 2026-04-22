@@ -24,6 +24,7 @@ from utils.forecasting.trend import (
     summarize_trend,
 )
 from utils.llm_utils import generate_insight
+from tabs._components import error_boundary
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +239,7 @@ def register_callbacks(app):
         Input("lfp-run", "n_clicks"),
         State("lfp-years-slider", "value"),
     )
+    @error_boundary(fallback_id="lfp-output")
     def update_lfp(n_clicks, years_ahead):
         if not n_clicks:
             raise PreventUpdate
@@ -323,6 +325,7 @@ def register_callbacks(app):
         Input("lfp-chat-button", "n_clicks"),
         State("lfp-chat-input", "value"),
     )
+    @error_boundary(fallback_id="lfp-chat-output")
     def update_lfp_chat(n_clicks, query):
         if not n_clicks or not query:
             raise PreventUpdate

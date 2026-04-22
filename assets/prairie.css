@@ -1,0 +1,407 @@
+/* =========================================================================
+   Prairie Insights — design system
+   -------------------------------------------------------------------------
+   Dash auto-loads every CSS file under /assets/, and sorts by filename —
+   "prairie.css" sorts *after* "bootstrap.min.css" so these rules cleanly
+   override Bootstrap defaults. Keep the file layered:
+
+     1. Tokens (custom properties)
+     2. Base / typography
+     3. Layout primitives (.pi-page, .pi-section, .pi-grid-*)
+     4. Components (navbar, tabs, tables, cards, alerts, chat)
+     5. Utilities (.pi-muted, .pi-pill, status indicators, skeletons)
+     6. Accessibility / reduced-motion / print
+
+   Everything is name-prefixed with `pi-` so it composes cleanly with
+   Bootstrap classes rather than hijacking them.
+   ========================================================================= */
+
+
+/* ------------------------------------------------------------------- *
+ *  1. Tokens
+ * ------------------------------------------------------------------- */
+:root {
+  /* colour — neutral surface + brand accent tuned to charts */
+  --pi-bg:              #f7f8fa;
+  --pi-surface:         #ffffff;
+  --pi-surface-alt:     #f2f4f8;
+  --pi-border:          #e2e6ed;
+  --pi-border-strong:   #c5ccd6;
+  --pi-text:            #1a2332;
+  --pi-text-muted:      #5c6b7e;
+  --pi-text-subtle:     #90a0b3;
+
+  --pi-brand:           #2b4f81;   /* Prairie blue */
+  --pi-brand-soft:      #dbe6f3;
+  --pi-brand-ink:       #1c3a61;
+
+  --pi-ok:              #1a7b51;
+  --pi-warn:            #a56800;
+  --pi-danger:          #b02727;
+
+  /* typography — SF/Inter stack with Monaco fallback for metric numbers */
+  --pi-font-sans:       -apple-system, BlinkMacSystemFont, "Segoe UI",
+                        Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --pi-font-mono:       "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
+  --pi-fs-xs:           0.75rem;
+  --pi-fs-sm:           0.875rem;
+  --pi-fs-base:         1rem;
+  --pi-fs-md:           1.125rem;
+  --pi-fs-lg:           1.375rem;
+  --pi-fs-xl:           1.75rem;
+  --pi-fs-2xl:          2.125rem;
+  --pi-lh-tight:        1.2;
+  --pi-lh-base:         1.55;
+
+  /* spacing — 4 pt grid */
+  --pi-sp-1: 0.25rem;
+  --pi-sp-2: 0.5rem;
+  --pi-sp-3: 0.75rem;
+  --pi-sp-4: 1rem;
+  --pi-sp-5: 1.25rem;
+  --pi-sp-6: 1.5rem;
+  --pi-sp-8: 2rem;
+  --pi-sp-10: 2.5rem;
+
+  /* radii + elevation */
+  --pi-radius-sm: 6px;
+  --pi-radius-md: 10px;
+  --pi-radius-lg: 16px;
+  --pi-shadow-sm: 0 1px 2px rgba(22,34,52,0.06);
+  --pi-shadow-md: 0 4px 12px -2px rgba(22,34,52,0.1);
+  --pi-shadow-lg: 0 12px 28px -6px rgba(22,34,52,0.18);
+
+  /* motion */
+  --pi-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --pi-dur-fast: 140ms;
+  --pi-dur-base: 240ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pi-bg:             #0f1620;
+    --pi-surface:        #1a2433;
+    --pi-surface-alt:    #22304a;
+    --pi-border:         #2d3d5a;
+    --pi-border-strong:  #3e5177;
+    --pi-text:           #e7ecf4;
+    --pi-text-muted:     #a7b4c6;
+    --pi-text-subtle:    #6b7d95;
+    --pi-brand:          #6ba0db;
+    --pi-brand-soft:     #22354f;
+    --pi-brand-ink:      #8eb6e3;
+    --pi-ok:             #5fc191;
+    --pi-warn:           #e4b65e;
+    --pi-danger:         #ef6a6a;
+    --pi-shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+    --pi-shadow-md: 0 4px 12px -2px rgba(0,0,0,0.5);
+    --pi-shadow-lg: 0 12px 28px -6px rgba(0,0,0,0.7);
+  }
+}
+
+
+/* ------------------------------------------------------------------- *
+ *  2. Base + typography
+ * ------------------------------------------------------------------- */
+html, body {
+  background: var(--pi-bg);
+  color: var(--pi-text);
+  font-family: var(--pi-font-sans);
+  font-size: var(--pi-fs-base);
+  line-height: var(--pi-lh-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--pi-text);
+  line-height: var(--pi-lh-tight);
+  letter-spacing: -0.01em;
+  margin-top: 0;
+  margin-bottom: var(--pi-sp-3);
+}
+h1 { font-size: var(--pi-fs-2xl); font-weight: 700; }
+h2 { font-size: var(--pi-fs-xl);  font-weight: 700; }
+h3 { font-size: var(--pi-fs-lg);  font-weight: 600; }
+h4 { font-size: var(--pi-fs-md);  font-weight: 600; }
+h5 { font-size: var(--pi-fs-base); font-weight: 600; text-transform: none; }
+h6 {
+  font-size: var(--pi-fs-sm); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--pi-text-muted);
+}
+
+p, li { color: var(--pi-text); }
+p.lead { color: var(--pi-text-muted); font-size: var(--pi-fs-md); }
+
+a { color: var(--pi-brand); text-decoration: none; transition: color var(--pi-dur-fast) var(--pi-ease); }
+a:hover, a:focus-visible { color: var(--pi-brand-ink); text-decoration: underline; }
+
+::selection { background: var(--pi-brand-soft); color: var(--pi-brand-ink); }
+
+/* Fine-grained focus ring — FAANG-y, keyboard-friendly */
+*:focus-visible {
+  outline: 2px solid var(--pi-brand);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+
+/* ------------------------------------------------------------------- *
+ *  3. Layout primitives
+ * ------------------------------------------------------------------- */
+.pi-page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: var(--pi-sp-8) var(--pi-sp-6) var(--pi-sp-10);
+}
+
+.pi-section {
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-md);
+  padding: var(--pi-sp-6);
+  box-shadow: var(--pi-shadow-sm);
+  margin-bottom: var(--pi-sp-6);
+}
+
+.pi-section > :first-child { margin-top: 0; }
+.pi-section > :last-child { margin-bottom: 0; }
+
+.pi-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--pi-sp-4);
+}
+
+
+/* ------------------------------------------------------------------- *
+ *  4. Components
+ * ------------------------------------------------------------------- */
+
+/* Navbar — brand strip */
+.navbar {
+  background: linear-gradient(180deg,
+    var(--pi-brand-ink) 0%,
+    var(--pi-brand) 100%) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: var(--pi-shadow-sm);
+  padding-top: var(--pi-sp-3);
+  padding-bottom: var(--pi-sp-3);
+}
+.navbar-brand {
+  color: #fff !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+}
+
+/* Dash tabs — elevate visually */
+.nav-tabs {
+  border-bottom: 1px solid var(--pi-border);
+  margin-bottom: var(--pi-sp-6);
+}
+.nav-tabs .nav-link {
+  color: var(--pi-text-muted);
+  border: none !important;
+  border-radius: 0 !important;
+  padding: var(--pi-sp-3) var(--pi-sp-5);
+  font-weight: 500;
+  transition: color var(--pi-dur-fast) var(--pi-ease),
+              box-shadow var(--pi-dur-fast) var(--pi-ease);
+}
+.nav-tabs .nav-link:hover { color: var(--pi-text); }
+.nav-tabs .nav-link.active {
+  color: var(--pi-brand-ink) !important;
+  background: transparent !important;
+  box-shadow: inset 0 -2px 0 0 var(--pi-brand);
+  font-weight: 600;
+}
+
+/* Buttons — subtle Material-ish */
+.btn {
+  border-radius: var(--pi-radius-sm);
+  transition: transform var(--pi-dur-fast) var(--pi-ease),
+              box-shadow var(--pi-dur-fast) var(--pi-ease);
+  font-weight: 500;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary {
+  background: var(--pi-brand) !important;
+  border-color: var(--pi-brand) !important;
+  box-shadow: var(--pi-shadow-sm);
+}
+.btn-primary:hover {
+  background: var(--pi-brand-ink) !important;
+  box-shadow: var(--pi-shadow-md);
+}
+
+/* Forms */
+.form-control, .Select-control, input[type="text"], input[type="number"] {
+  background: var(--pi-surface) !important;
+  color: var(--pi-text) !important;
+  border: 1px solid var(--pi-border) !important;
+  border-radius: var(--pi-radius-sm) !important;
+  transition: border-color var(--pi-dur-fast) var(--pi-ease),
+              box-shadow var(--pi-dur-fast) var(--pi-ease);
+}
+.form-control:focus, .Select-control.is-focused,
+input[type="text"]:focus, input[type="number"]:focus {
+  border-color: var(--pi-brand) !important;
+  box-shadow: 0 0 0 3px var(--pi-brand-soft) !important;
+}
+
+/* Tables */
+.table {
+  color: var(--pi-text);
+  border-radius: var(--pi-radius-sm);
+  overflow: hidden;
+  background: var(--pi-surface);
+}
+.table thead th {
+  background: var(--pi-surface-alt);
+  color: var(--pi-text-muted);
+  font-weight: 600;
+  font-size: var(--pi-fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--pi-border-strong);
+}
+.table tbody td {
+  border-bottom: 1px solid var(--pi-border);
+  font-variant-numeric: tabular-nums;
+}
+.table-striped > tbody > tr:nth-of-type(odd) > * {
+  background-color: var(--pi-surface-alt);
+  color: var(--pi-text);
+}
+.table-sm td, .table-sm th { padding: var(--pi-sp-2) var(--pi-sp-3); }
+
+/* Alerts */
+.alert {
+  border-radius: var(--pi-radius-sm);
+  border: 1px solid var(--pi-border);
+  font-size: var(--pi-fs-sm);
+}
+.alert-warning { background: #fff8e6; color: var(--pi-warn); border-color: #ead99a; }
+.alert-light {
+  background: var(--pi-surface-alt);
+  color: var(--pi-text);
+  border-color: var(--pi-border);
+}
+.alert-danger {
+  background: #fdecec;
+  color: var(--pi-danger);
+  border-color: #f4c5c5;
+}
+
+/* Chat input strip */
+#eda-chat-input, #lfp-chat-input, #super-chat-input, #about-chat-input {
+  width: 80%;
+  margin-right: var(--pi-sp-3);
+}
+
+
+/* ------------------------------------------------------------------- *
+ *  5. Utilities — pill, status, skeletons
+ * ------------------------------------------------------------------- */
+.pi-muted   { color: var(--pi-text-muted) !important; }
+.pi-subtle  { color: var(--pi-text-subtle) !important; }
+
+.pi-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pi-sp-2);
+  padding: var(--pi-sp-1) var(--pi-sp-3);
+  border-radius: 999px;
+  font-size: var(--pi-fs-xs);
+  font-weight: 500;
+  line-height: 1.4;
+  background: var(--pi-surface-alt);
+  color: var(--pi-text-muted);
+  border: 1px solid var(--pi-border);
+}
+.pi-pill--ok      { background:#e5f5ed; color: var(--pi-ok);    border-color:#b8e0c9; }
+.pi-pill--warn    { background:#fff6e0; color: var(--pi-warn);  border-color:#ecd8a0; }
+.pi-pill--danger  { background:#fbe3e3; color: var(--pi-danger);border-color:#f1b8b8; }
+
+.pi-dot {
+  display: inline-block;
+  width: 0.5em; height: 0.5em;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/* Status strip under the navbar */
+.pi-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pi-sp-3);
+  align-items: center;
+  padding: var(--pi-sp-3) var(--pi-sp-6);
+  background: var(--pi-surface);
+  border-bottom: 1px solid var(--pi-border);
+  font-size: var(--pi-fs-sm);
+  color: var(--pi-text-muted);
+}
+.pi-status-strip .pi-status-label {
+  color: var(--pi-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--pi-fs-xs);
+  margin-right: var(--pi-sp-1);
+}
+
+/* Loading skeleton (used as a placeholder via .pi-skeleton className) */
+.pi-skeleton {
+  background: linear-gradient(90deg,
+      var(--pi-surface-alt) 0%,
+      var(--pi-border) 40%,
+      var(--pi-surface-alt) 80%);
+  background-size: 200% 100%;
+  animation: pi-shimmer 1.3s linear infinite;
+  border-radius: var(--pi-radius-sm);
+  min-height: 1em;
+}
+@keyframes pi-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Tooltip helper (<span data-pi-tip="...">) */
+[data-pi-tip] { position: relative; cursor: help; border-bottom: 1px dotted var(--pi-text-subtle); }
+[data-pi-tip]::after {
+  content: attr(data-pi-tip);
+  position: absolute;
+  left: 0; top: 120%;
+  padding: var(--pi-sp-2) var(--pi-sp-3);
+  background: var(--pi-text);
+  color: var(--pi-surface);
+  font-size: var(--pi-fs-xs);
+  border-radius: var(--pi-radius-sm);
+  white-space: nowrap;
+  box-shadow: var(--pi-shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity var(--pi-dur-fast) var(--pi-ease),
+              transform var(--pi-dur-fast) var(--pi-ease);
+  z-index: 10;
+}
+[data-pi-tip]:hover::after, [data-pi-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+
+/* ------------------------------------------------------------------- *
+ *  6. Accessibility / reduced-motion / print
+ * ------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition: none !important; }
+}
+
+@media print {
+  .navbar, .pi-status-strip, .nav-tabs, button, .btn { display: none !important; }
+  .pi-section { break-inside: avoid; box-shadow: none; border: 1px solid #aaa; }
+}

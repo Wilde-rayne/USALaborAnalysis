@@ -20,6 +20,7 @@ from utils.constants import ALL_STATES, MONTH_MAP, SUPERSECTORS
 from utils.data_pipeline import OUTPUT_JSON, ensure_data
 from utils.forecasting import ForecastResult, select_forecaster
 from utils.llm_utils import generate_insight
+from tabs._components import error_boundary
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +296,7 @@ def register_callbacks(app):
         State("supersector-years-slider", "value"),
         State("supersector-threshold", "value"),
     )
+    @error_boundary(fallback_id="super-output")
     def update_super(n_clicks, sector, years_ahead, threshold):
         if not n_clicks:
             raise PreventUpdate
@@ -384,6 +386,7 @@ def register_callbacks(app):
         Input("super-chat-button", "n_clicks"),
         State("super-chat-input", "value"),
     )
+    @error_boundary(fallback_id="super-chat-output")
     def update_super_chat(n_clicks, query):
         if not n_clicks or not query:
             raise PreventUpdate

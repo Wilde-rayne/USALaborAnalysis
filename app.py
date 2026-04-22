@@ -224,25 +224,85 @@ def _health():  # noqa: D401 — Flask handler
     }
     return body, (200 if ready else 503)
 
-app.layout = html.Div([
-    dbc.NavbarSimple("Prairie Insights: Midwest Labor Dashboard",
-                     color="dark", dark=True, className="mb-4"),
-    dbc.Tabs(
-        id="tabs", active_tab="eda",
-        children=[
-            dbc.Tab(label="EDA / Overview",       tab_id="eda"),
-            dbc.Tab(label="LFP Forecast",         tab_id="lfp"),
-            dbc.Tab(label="Supersector Forecast", tab_id="super"),
-            dbc.Tab(label="About",                tab_id="about"),
-        ],
-    ),
-    html.Div(id="tab-content", className="p-4"),
-])
+from tabs._components import status_pill  # noqa: E402
 
-@app.callback(Output("tab-content","children"),
-              Input("tabs","active_tab"))
+_STATUS_INTERVAL_MS = 5_000
+
+
+def _status_strip() -> html.Div:
+    """Header strip below the navbar — data freshness + state coverage."""
+    return html.Div(
+        id="pi-status-strip",
+        className="pi-status-strip",
+        children=_status_children(),
+    )
+
+
+def _status_children() -> list:
+    """Rebuilt every few seconds from a lightweight interval poll."""
+    ready = preload_state.preload_completed_at is not None
+    return [
+        html.Span("preload", className="pi-status-label"),
+        status_pill(
+            preload_state.preload_completed_at or "warming up…",
+            tone="ok" if ready else "warn",
+        ),
+        html.Span("states", className="pi-status-label"),
+        status_pill(
+            f"{len(ALL_STATES)} active",
+            tone="default",
+            title=", ".join(ALL_STATES),
+        ),
+        html.Span("coverage", className="pi-status-label"),
+        status_pill(f"{START_YEAR}–{END_YEAR}", tone="default"),
+        html.Span("chat model", className="pi-status-label"),
+        status_pill(OLLAMA_MODEL, tone="default"),
+    ]
+
+
+app.layout = html.Div(
+    [
+        dbc.NavbarSimple(
+            "Prairie Insights — US Labor Analysis",
+            color="dark",
+            dark=True,
+        ),
+        _status_strip(),
+        dcc.Interval(id="pi-status-tick", interval=_STATUS_INTERVAL_MS, n_intervals=0),
+        html.Div(
+            [
+                dbc.Tabs(
+                    id="tabs",
+                    active_tab="eda",
+                    children=[
+                        dbc.Tab(label="EDA / Overview",       tab_id="eda"),
+                        dbc.Tab(label="LFP Forecast",         tab_id="lfp"),
+                        dbc.Tab(label="Supersector Forecast", tab_id="super"),
+                        dbc.Tab(label="About",                tab_id="about"),
+                    ],
+                ),
+                html.Div(id="tab-content"),
+            ],
+            className="pi-page",
+        ),
+    ]
+)
+
+
+@app.callback(
+    Output("tab-content", "children"),
+    Input("tabs", "active_tab"),
+)
 def display_tab(active_tab):
-    return tabs.get(active_tab, tabs['eda']).render_layout()
+    return tabs.get(active_tab, tabs["eda"]).render_layout()
+
+
+@app.callback(
+    Output("pi-status-strip", "children"),
+    Input("pi-status-tick", "n_intervals"),
+)
+def _refresh_status(_n):
+    return _status_children()
 
 def register_all_callbacks(app):
     for m in tabs.values():
