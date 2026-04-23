@@ -96,6 +96,15 @@ class SeasonalNaiveForecaster(BaseForecaster):
             return None
         return self._y[self.season :] - self._y[: -self.season]
 
+    def _interval_step_scale(self, steps: np.ndarray) -> np.ndarray:
+        """
+        Variance grows by season block, not continuously. Forecasts
+        within the same season share noise because they re-use the
+        same historical value, so the stepwise CI widening happens
+        once per ``season`` periods rather than every step.
+        """
+        return np.sqrt(np.floor((steps - 1) / self.season) + 1.0)
+
 
 # --------------------------------------------------------------------------
 # Exponential smoothing (statsmodels)
@@ -158,6 +167,35 @@ class ETSForecaster(BaseForecaster):
     def predict(self, horizon: int) -> np.ndarray:
         self._require_fitted()
         return np.asarray(self._fitted_model.forecast(horizon), dtype=float)
+
+    def predict_interval(
+        self, horizon: int, alpha: float = 0.05
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """
+        Interval via parametric bootstrap through statsmodels'
+        ``.simulate()`` — repeatedly sample future paths under the
+        fitted state-space model and take per-step empirical quantiles.
+        Falls back to the residual-bootstrap base implementation if
+        simulate isn't supported by the underlying results object.
+        """
+        self._require_fitted()
+        try:
+            n_sim = 1000
+            sims = np.column_stack(
+                [
+                    np.asarray(self._fitted_model.simulate(horizon), dtype=float)
+                    for _ in range(n_sim)
+                ]
+            )
+            preds = self.predict(horizon)
+            lo_q = alpha / 2
+            hi_q = 1 - alpha / 2
+            lower = np.quantile(sims, lo_q, axis=1)
+            upper = np.quantile(sims, hi_q, axis=1)
+            return preds, lower, upper
+        except Exception:  # noqa: BLE001
+            # Fall back to residual-bootstrap if simulate misbehaves.
+            return super().predict_interval(horizon, alpha=alpha)
 
     @property
     def residuals(self) -> np.ndarray | None:

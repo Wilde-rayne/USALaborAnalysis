@@ -254,8 +254,15 @@ def register_callbacks(app):
         mw_result = entry[MIDWEST_COL]
 
         months = years_ahead * 12
-        preds_ia = ia_result.model.predict(months)
-        preds_mw = mw_result.model.predict(months)
+        # Point forecasts + 95% prediction intervals. predict_interval
+        # returns None only for models that intentionally don't support
+        # CIs; our built-in four all do, so guard for mypy-style safety.
+        ia_preds, ia_lo, ia_hi = ia_result.model.predict_interval(months) or (
+            ia_result.model.predict(months), None, None
+        )
+        mw_preds, mw_lo, mw_hi = mw_result.model.predict_interval(months) or (
+            mw_result.model.predict(months), None, None
+        )
 
         last_date = combo["date"].max()
         dates = [last_date + pd.DateOffset(months=i + 1) for i in range(months)]
@@ -266,24 +273,55 @@ def register_callbacks(app):
         ia_roll_mean, _ = rolling_statistics(combo[IA_COL].to_numpy(), window=12)
         mw_roll_mean, _ = rolling_statistics(combo[MIDWEST_COL].to_numpy(), window=12)
 
-        fig = go.Figure(
-            [
-                go.Scatter(x=combo["date"], y=combo[IA_COL], mode="lines", name="Iowa Historic",
-                           line=dict(width=1.5)),
-                go.Scatter(x=combo["date"], y=ia_roll_mean, mode="lines",
-                           name="Iowa 12-mo avg",
-                           line=dict(dash="dash", color="rgba(31,119,180,0.55)", width=2)),
-                go.Scatter(x=combo["date"], y=combo[MIDWEST_COL], mode="lines",
-                           name="Midwest Historic", line=dict(width=1.5)),
-                go.Scatter(x=combo["date"], y=mw_roll_mean, mode="lines",
-                           name="Midwest 12-mo avg",
-                           line=dict(dash="dash", color="rgba(255,127,14,0.55)", width=2)),
-                go.Scatter(x=dates, y=preds_ia, mode="lines+markers",
-                           name=f"Iowa Forecast ({ia_result.name})"),
-                go.Scatter(x=dates, y=preds_mw, mode="lines+markers",
-                           name=f"Midwest Forecast ({mw_result.name})"),
-            ]
-        )
+        # Inline score badge so chart legend carries the statistical
+        # receipt — e.g. "Iowa Forecast (ets · RMSE 0.41)".
+        ia_label = f"Iowa Forecast ({ia_result.name} · RMSE {ia_result.metrics.rmse:.2f})"
+        mw_label = f"Midwest Forecast ({mw_result.name} · RMSE {mw_result.metrics.rmse:.2f})"
+
+        fig_traces = [
+            # Historic
+            go.Scatter(x=combo["date"], y=combo[IA_COL], mode="lines", name="Iowa Historic",
+                       line=dict(width=1.5, color="rgb(31,119,180)")),
+            go.Scatter(x=combo["date"], y=ia_roll_mean, mode="lines",
+                       name="Iowa 12-mo avg",
+                       line=dict(dash="dash", color="rgba(31,119,180,0.55)", width=2)),
+            go.Scatter(x=combo["date"], y=combo[MIDWEST_COL], mode="lines",
+                       name="Midwest Historic",
+                       line=dict(width=1.5, color="rgb(255,127,14)")),
+            go.Scatter(x=combo["date"], y=mw_roll_mean, mode="lines",
+                       name="Midwest 12-mo avg",
+                       line=dict(dash="dash", color="rgba(255,127,14,0.55)", width=2)),
+        ]
+        # 95% CI shaded bands — upper trace first with fill=None, then
+        # lower trace with fill='tonexty' to shade between the two.
+        if ia_hi is not None and ia_lo is not None:
+            fig_traces.extend([
+                go.Scatter(x=dates, y=ia_hi, mode="lines", name="Iowa 95% CI upper",
+                           line=dict(width=0), showlegend=False, hoverinfo="skip"),
+                go.Scatter(x=dates, y=ia_lo, mode="lines", name="Iowa 95% CI",
+                           fill="tonexty", fillcolor="rgba(31,119,180,0.18)",
+                           line=dict(width=0), hoverinfo="skip"),
+            ])
+        if mw_hi is not None and mw_lo is not None:
+            fig_traces.extend([
+                go.Scatter(x=dates, y=mw_hi, mode="lines", name="Midwest 95% CI upper",
+                           line=dict(width=0), showlegend=False, hoverinfo="skip"),
+                go.Scatter(x=dates, y=mw_lo, mode="lines", name="Midwest 95% CI",
+                           fill="tonexty", fillcolor="rgba(255,127,14,0.18)",
+                           line=dict(width=0), hoverinfo="skip"),
+            ])
+        # Point forecasts on top of the shading.
+        fig_traces.extend([
+            go.Scatter(x=dates, y=ia_preds, mode="lines+markers", name=ia_label,
+                       line=dict(color="rgb(31,119,180)", width=2.5),
+                       marker=dict(size=6)),
+            go.Scatter(x=dates, y=mw_preds, mode="lines+markers", name=mw_label,
+                       line=dict(color="rgb(255,127,14)", width=2.5),
+                       marker=dict(size=6)),
+        ])
+        fig = go.Figure(fig_traces)
+        preds_ia = ia_preds  # preserved for the downstream prompt block
+        preds_mw = mw_preds
         fig.update_layout(
             title=f"LFP Forecast (+{years_ahead} yrs)",
             xaxis_title="Date",

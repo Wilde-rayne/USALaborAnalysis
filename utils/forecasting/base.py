@@ -114,6 +114,42 @@ class BaseForecaster(ABC):
     def predict(self, horizon: int) -> np.ndarray:
         ...
 
+    def predict_interval(
+        self, horizon: int, alpha: float = 0.05
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """
+        Return ``(point, lower, upper)`` forecasts at a ``(1 - alpha)``
+        confidence level, or ``None`` if the model can't produce an
+        interval.
+
+        Default implementation uses a residual-bootstrap band with
+        ``sqrt(step)`` variance growth — the random-walk / Brownian
+        assumption that's appropriate for naive / drift-free models
+        and a reasonable fallback for everything else. Models with
+        better-behaved variance expansion (seasonal, ARIMA-class)
+        override to plug in their own step-scale function.
+        """
+        preds = self.predict(horizon)
+        resid = self.residuals
+        if resid is None or resid.size < 2:
+            return preds, preds.copy(), preds.copy()
+
+        from scipy.stats import norm  # noqa: PLC0415 — lazy for non-stats paths
+
+        sigma = float(np.std(resid, ddof=0))
+        if sigma == 0 or not np.isfinite(sigma):
+            return preds, preds.copy(), preds.copy()
+        z = float(norm.ppf(1 - alpha / 2))
+        steps = np.arange(1, horizon + 1, dtype=float)
+        band = z * sigma * self._interval_step_scale(steps)
+        return preds, preds - band, preds + band
+
+    # Models choose how their prediction variance grows with horizon.
+    # Default: sqrt(step) — Brownian. Seasonal-naive overrides with a
+    # blockier version.
+    def _interval_step_scale(self, steps: np.ndarray) -> np.ndarray:
+        return np.sqrt(steps)
+
     # Subclasses that can expose residuals override this. Default is the
     # (trivial) in-sample zero-residual, which is never useful for
     # diagnostics — so the diagnostics module checks for None explicitly.

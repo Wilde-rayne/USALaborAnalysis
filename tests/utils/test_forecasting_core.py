@@ -268,6 +268,62 @@ class TestSelectForecaster:
 # --------------------------------------------------------------------------
 # Property-based: selector invariants
 # --------------------------------------------------------------------------
+class TestPredictInterval:
+    """Every model must produce a sane 95% CI or explicitly return None."""
+
+    def test_naive_interval_shape_and_monotone_widening(self) -> None:
+        rng = np.random.default_rng(0)
+        y = rng.normal(0, 1, size=120)
+        f = NaiveForecaster().fit(y, None)
+        result = f.predict_interval(horizon=12, alpha=0.05)
+        assert result is not None
+        preds, lower, upper = result
+        assert preds.shape == lower.shape == upper.shape == (12,)
+        # Point forecast must fall inside the band.
+        assert np.all(lower <= preds + 1e-9)
+        assert np.all(upper >= preds - 1e-9)
+        # Band width monotone non-decreasing (sqrt(step) growth).
+        widths = upper - lower
+        assert np.all(np.diff(widths) >= -1e-9)
+
+    def test_seasonal_naive_interval_blockwise_growth(self) -> None:
+        # Seasonal-naive re-uses same y[-season] for every forecast
+        # within a season block, so CI widens once per season, not
+        # every step.
+        rng = np.random.default_rng(1)
+        y = rng.normal(0, 1, size=120)
+        f = SeasonalNaiveForecaster(season=12).fit(y, None)
+        result = f.predict_interval(horizon=24, alpha=0.05)
+        assert result is not None
+        _, lower, upper = result
+        widths = upper - lower
+        # Width at step 1 == width at step 12 (same season block);
+        # width jumps at step 13 (new season block).
+        assert widths[0] == pytest.approx(widths[11])
+        assert widths[12] > widths[11]
+
+    def test_interval_with_no_residuals_returns_trivial(self) -> None:
+        """An empty-series naive should degrade gracefully, not raise."""
+        # Single observation — residuals length 0.
+        f = NaiveForecaster().fit(np.array([5.0]), None)
+        result = f.predict_interval(horizon=3)
+        assert result is not None
+        preds, lower, upper = result
+        # No spread available → band collapses to the point forecast.
+        assert np.array_equal(preds, lower)
+        assert np.array_equal(preds, upper)
+
+    def test_interval_alpha_respected(self) -> None:
+        """Smaller alpha (wider interval) must give a wider band."""
+        rng = np.random.default_rng(2)
+        y = rng.normal(0, 1, size=60)
+        f = NaiveForecaster().fit(y, None)
+        _, lo95, hi95 = f.predict_interval(horizon=6, alpha=0.05)
+        _, lo80, hi80 = f.predict_interval(horizon=6, alpha=0.20)
+        # 95 % wider than 80 %.
+        assert np.all((hi95 - lo95) > (hi80 - lo80))
+
+
 class TestSelectorProperty:
     @pytest.mark.numerical
     @given(
