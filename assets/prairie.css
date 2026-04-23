@@ -542,6 +542,20 @@ select:focus, textarea:focus {
   .pi-chat-fab { bottom: 16px; right: 16px; padding: 0.6rem 1rem; }
 }
 
+/* ------------------------------------------------------------------- *
+ *  Selector grid — lays filter controls out in a 2-column grid on
+ *  reasonable widths, collapses to single column on mobile. Used by
+ *  the Super tab's expanded selector block (I4).
+ * ------------------------------------------------------------------- */
+.pi-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--pi-sp-5);
+}
+@media (max-width: 720px) {
+  .pi-selector-grid { grid-template-columns: 1fr; }
+}
+
 
 /* ------------------------------------------------------------------- *
  *  5. Utilities — pill, status, skeletons

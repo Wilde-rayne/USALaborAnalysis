@@ -20,7 +20,29 @@ from utils.constants import ALL_STATES, MONTH_MAP, SUPERSECTORS
 from utils.data_pipeline import OUTPUT_JSON, ensure_data
 from utils.forecasting import ForecastResult, select_forecaster
 from utils.llm_utils import generate_insight
+from utils.ontology import ONTOLOGY
 from tabs._components import error_boundary
+
+# Region options offered in the filter. Territories are grouped under
+# "Pacific" + "Caribbean" per the ontology; "All" shows whatever
+# ``ALL_STATES`` resolves to (env-controlled).
+REGION_OPTIONS: list[dict] = [
+    {"label": "All active", "value": "__all__"},
+    {"label": "Midwest",    "value": "Midwest"},
+    {"label": "Northeast",  "value": "Northeast"},
+    {"label": "South",      "value": "South"},
+    {"label": "West",       "value": "West"},
+    {"label": "Caribbean (territories)", "value": "Caribbean"},
+    {"label": "Pacific (territories)",   "value": "Pacific"},
+]
+
+SORT_OPTIONS: list[dict] = [
+    {"label": "Forecast value (high → low)", "value": "value_desc"},
+    {"label": "Forecast value (low → high)", "value": "value_asc"},
+    {"label": "% growth vs. last known",     "value": "growth_desc"},
+    {"label": "CI width (most uncertain)",   "value": "ci_desc"},
+    {"label": "CI width (most certain)",     "value": "ci_asc"},
+]
 
 logger = logging.getLogger(__name__)
 
@@ -211,67 +233,133 @@ def render_layout():
         [
             html.H5("Supersector Employment Forecast"),
             html.P(
-                "For each state, a Naive/Seasonal-Naive/ETS bakeoff selects "
-                "the model with the lowest expanding-window RMSE. Bars show "
-                "the winning model's forward projection.",
+                "For each state, a Naive / Seasonal-Naive / ETS bakeoff "
+                "selects the model with the lowest expanding-window RMSE. "
+                "Bars show the winning model's forward projection with "
+                "95 % prediction intervals as error bars.",
                 className="text-muted small",
             ),
             html.Div(
                 [
-                    html.Label("Select Supersector:"),
-                    dcc.Dropdown(
-                        id="supersector-dropdown",
-                        options=[
-                            {"label": s.replace("_", " "), "value": s} for s in SUPERSECTORS
+                    html.Div(
+                        [
+                            html.Label("Supersector", htmlFor="supersector-dropdown"),
+                            dcc.Dropdown(
+                                id="supersector-dropdown",
+                                options=[
+                                    {"label": s.replace("_", " "), "value": s}
+                                    for s in SUPERSECTORS
+                                ],
+                                value=SUPERSECTORS[0],
+                                clearable=False,
+                            ),
                         ],
-                        value=SUPERSECTORS[0],
-                        clearable=False,
+                        className="mb-3",
+                    ),
+                    html.Div(
+                        [
+                            html.Label("Region filter", htmlFor="supersector-region"),
+                            dcc.Dropdown(
+                                id="supersector-region",
+                                options=REGION_OPTIONS,
+                                value="__all__",
+                                clearable=False,
+                            ),
+                            html.Small(
+                                "Restrict the chart and the recommendation card "
+                                "to states in one Census region.",
+                                className="pi-muted",
+                            ),
+                        ],
+                        className="mb-3",
+                    ),
+                    html.Div(
+                        [
+                            html.Label("Sort by", htmlFor="supersector-sort"),
+                            dcc.Dropdown(
+                                id="supersector-sort",
+                                options=SORT_OPTIONS,
+                                value="value_desc",
+                                clearable=False,
+                            ),
+                        ],
+                        className="mb-3",
+                    ),
+                    html.Div(
+                        [
+                            html.Label("Years ahead", htmlFor="supersector-years-slider"),
+                            dcc.Slider(
+                                id="supersector-years-slider",
+                                min=1,
+                                max=5,
+                                step=1,
+                                marks={i: str(i) for i in range(1, 6)},
+                                value=2,
+                            ),
+                        ],
+                        className="mb-3",
+                    ),
+                    html.Div(
+                        [
+                            html.Label(
+                                "Hide states under this % of median (0 = show all)",
+                                htmlFor="supersector-threshold",
+                            ),
+                            dcc.Slider(
+                                id="supersector-threshold",
+                                min=0,
+                                max=80,
+                                step=10,
+                                marks={0: "off", 25: "25%", 50: "50%", 75: "75%"},
+                                value=0,
+                            ),
+                        ],
+                        className="mb-3",
+                    ),
+                    html.Div(
+                        [
+                            html.Button(
+                                "Run Forecast",
+                                id="supersector-run",
+                                className="btn btn-primary",
+                            ),
+                        ],
+                        className="mb-3",
                     ),
                 ],
-                className="mb-2",
-            ),
-            html.Div(
-                [
-                    html.Label("Years Ahead:"),
-                    dcc.Slider(
-                        id="supersector-years-slider",
-                        min=1,
-                        max=5,
-                        step=1,
-                        marks={i: str(i) for i in range(1, 6)},
-                        value=2,
-                    ),
-                ],
-                className="mb-2",
-            ),
-            html.Div(
-                [
-                    html.Label(
-                        "Hide states under % of median (0 = show all):",
-                        className="form-label small",
-                    ),
-                    dcc.Slider(
-                        id="supersector-threshold",
-                        min=0,
-                        max=80,
-                        step=10,
-                        marks={0: "off", 25: "25%", 50: "50%", 75: "75%"},
-                        value=0,
-                    ),
-                ],
-                className="mb-2",
-            ),
-            html.Div(
-                [
-                    html.Button(
-                        "Run Forecast", id="supersector-run", className="mt-2 btn btn-primary"
-                    ),
-                ],
-                className="mb-3",
+                className="pi-selector-grid",
             ),
             dcc.Loading(id="loading-super", children=html.Div(id="super-output")),
         ]
     )
+
+
+def _apply_region_filter(entry: dict[str, ForecastResult], region: str) -> dict[str, ForecastResult]:
+    if region in (None, "__all__"):
+        return entry
+    allowed = {s.code for s in ONTOLOGY.states_in(region)}
+    return {code: result for code, result in entry.items() if code in allowed}
+
+
+def _sort_states(
+    state_values: dict[str, dict],
+    mode: str,
+) -> list[str]:
+    """
+    ``state_values`` maps state code → {"value", "growth", "ci_width"}.
+    Returns the state codes in the order requested.
+    """
+    if mode == "value_asc":
+        key = lambda c: state_values[c]["value"]; reverse = False  # noqa: E731
+    elif mode == "growth_desc":
+        key = lambda c: state_values[c]["growth"]; reverse = True  # noqa: E731
+    elif mode == "ci_desc":
+        key = lambda c: state_values[c]["ci_width"]; reverse = True  # noqa: E731
+    elif mode == "ci_asc":
+        key = lambda c: state_values[c]["ci_width"]; reverse = False  # noqa: E731
+    else:
+        key = lambda c: state_values[c]["value"]; reverse = True  # noqa: E731 — value_desc default
+    return sorted(state_values.keys(), key=key, reverse=reverse)
 
 
 def register_callbacks(app):
@@ -279,75 +367,142 @@ def register_callbacks(app):
         Output("super-output", "children"),
         Input("supersector-run", "n_clicks"),
         State("supersector-dropdown", "value"),
+        State("supersector-region", "value"),
+        State("supersector-sort", "value"),
         State("supersector-years-slider", "value"),
         State("supersector-threshold", "value"),
     )
     @error_boundary(fallback_id="super-output")
-    def update_super(n_clicks, sector, years_ahead, threshold):
+    def update_super(n_clicks, sector, region, sort_mode, years_ahead, threshold):
         if not n_clicks:
             raise PreventUpdate
 
         df = _load_super_panel()
         entry = _get_or_train_supersector(sector, years_ahead, df)
+        entry = _apply_region_filter(entry, region)
         if not entry:
             return html.Div(
-                f"No {sector.replace('_', ' ')} data available for any Midwest state.",
+                f"No {sector.replace('_', ' ')} data available for the "
+                f"selected region.",
                 className="alert alert-warning",
             )
 
-        # Final forecast value per state (end of horizon).
-        forecasts: dict[str, float] = {}
+        # Per-state summary: forecast value at end of horizon, growth
+        # vs. last observed value, and 95% CI width — feeds the chart
+        # error bars and the sort selector.
+        months = years_ahead * 12
+        state_summary: dict[str, dict] = {}
         for st, result in entry.items():
-            preds = result.model.predict(years_ahead * 12)
-            forecasts[st] = float(preds[-1]) if len(preds) else 0.0
+            interval = result.model.predict_interval(months, alpha=0.05)
+            if interval is None:
+                preds = result.model.predict(months)
+                lower, upper = preds, preds
+            else:
+                preds, lower, upper = interval
+            col = f"{st}_{sector}"
+            last_known = float(df[col].dropna().iloc[-1]) if col in df.columns and not df[col].dropna().empty else 0.0
+            forecast_val = float(preds[-1]) if len(preds) else 0.0
+            growth = ((forecast_val - last_known) / last_known * 100.0) if last_known else 0.0
+            state_summary[st] = {
+                "value":    forecast_val,
+                "lower":    float(lower[-1]) if len(lower) else forecast_val,
+                "upper":    float(upper[-1]) if len(upper) else forecast_val,
+                "ci_width": float(upper[-1] - lower[-1]) if len(lower) else 0.0,
+                "growth":   growth,
+                "last":     last_known,
+                "model":    result.name,
+                "rmse":     result.metrics.rmse,
+            }
 
-        vals = np.array(list(forecasts.values()), dtype=float)
-        forecasts["Midwest Mean"] = float(vals.mean())
-        forecasts["Midwest Median"] = float(np.median(vals))
+        # Aggregate reference rows (always shown; don't get filtered by
+        # region — they're descriptive for whatever set is on-screen).
+        vals = np.array([s["value"] for s in state_summary.values()], dtype=float)
+        mean_val = float(vals.mean()) if vals.size else 0.0
+        median_val = float(np.median(vals)) if vals.size else 0.0
 
-        # Capture full set before threshold filter for the recommendation
-        # panel (so users see the ranked top/bottom regardless of display
-        # filter).
-        all_forecasts = dict(forecasts)
-        forecasts = _apply_threshold(forecasts, threshold)
+        # Threshold filter — applied after growth etc. are computed so
+        # the recommendation panel can still see the full set.
+        display_states = _sort_states(state_summary, sort_mode)
+        flat_forecasts = {c: state_summary[c]["value"] for c in display_states}
+        flat_forecasts["Region Mean"] = mean_val
+        flat_forecasts["Region Median"] = median_val
+        all_forecasts = dict(flat_forecasts)
+        flat_forecasts = _apply_threshold(flat_forecasts, threshold)
 
-        items = sorted(forecasts.items(), key=lambda x: x[1], reverse=True)
-        labels, data = zip(*items)
-        mn, mx = min(data), max(data)
+        # Rebuild ordered state list after threshold.
+        display_states = [c for c in display_states if c in flat_forecasts]
+
+        # Plotly bars + error bars for 95% CI.
+        labels = display_states + ["Region Mean", "Region Median"]
+        data = [state_summary[c]["value"] for c in display_states] + [mean_val, median_val]
+        error_up = (
+            [state_summary[c]["upper"] - state_summary[c]["value"] for c in display_states]
+            + [0.0, 0.0]
+        )
+        error_dn = (
+            [state_summary[c]["value"] - state_summary[c]["lower"] for c in display_states]
+            + [0.0, 0.0]
+        )
+        hover = (
+            [
+                f"<b>{c}</b><br>forecast {state_summary[c]['value']:,.1f}"
+                f"<br>95% CI [{state_summary[c]['lower']:,.1f}, "
+                f"{state_summary[c]['upper']:,.1f}]"
+                f"<br>growth vs last {state_summary[c]['growth']:+.1f}%"
+                f"<br>model {state_summary[c]['model']} (RMSE {state_summary[c]['rmse']:.2f})"
+                for c in display_states
+            ]
+            + [f"<b>Region Mean</b><br>{mean_val:,.1f}",
+               f"<b>Region Median</b><br>{median_val:,.1f}"]
+        )
+        mn, mx = (min(data), max(data)) if data else (0.0, 1.0)
         colors = [
-            "blue"
-            if lbl.startswith("Midwest")
+            "rgb(43,79,129)" if lbl.startswith("Region")
             else f"rgb({int(255 * (1 - (v - mn) / (mx - mn + 1e-6)))},"
                  f"{int(255 * ((v - mn) / (mx - mn + 1e-6)))},0)"
-            for lbl, v in items
+            for lbl, v in zip(labels, data)
         ]
 
         fig = go.Figure(
             [
                 go.Bar(
-                    x=list(labels),
-                    y=list(data),
+                    x=labels,
+                    y=data,
                     marker=dict(color=colors),
-                    text=[f"{v:,.1f}" for v in data],
+                    error_y=dict(
+                        type="data",
+                        symmetric=False,
+                        array=error_up,
+                        arrayminus=error_dn,
+                        color="rgba(60, 70, 90, 0.55)",
+                        thickness=1.5,
+                        width=6,
+                    ),
+                    text=[f"{v:,.0f}" for v in data],
                     textposition="auto",
+                    hovertext=hover,
+                    hoverinfo="text",
                 )
             ]
         )
         fig.update_layout(
-            title=f"{sector.replace('_', ' ')} Forecast (+{years_ahead} yrs)",
+            title=(
+                f"{sector.replace('_', ' ')} Forecast (+{years_ahead} yrs) "
+                f"— {('All active' if region in (None, '__all__') else region)}"
+            ),
             xaxis_title="State",
             yaxis_title="Forecasted Employment",
             template="plotly_white",
         )
 
-        # Narrative from the chat model, keyed on the winning-model mix.
         winner_counts: dict[str, int] = {}
         for r in entry.values():
             winner_counts[r.name] = winner_counts.get(r.name, 0) + 1
         winner_summary = ", ".join(f"{n} × {c}" for n, c in winner_counts.items())
         prompt = (
-            f"From forecasts for '{sector}' (+{years_ahead} years): "
-            + ", ".join(f"{lbl} {forecasts[lbl]:,.1f}" for lbl in labels)
+            f"From forecasts for '{sector}' (+{years_ahead} years, "
+            f"region={region}, sort={sort_mode}): "
+            + ", ".join(f"{lbl} {flat_forecasts[lbl]:,.1f}" for lbl in labels if lbl in flat_forecasts)
             + f". Per-state model selection: {winner_summary}. "
             "Provide a concise 3-sentence analysis for regional planners."
         )
