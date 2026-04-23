@@ -241,6 +241,7 @@ a:hover, a:focus-visible { color: var(--pi-brand-ink); text-decoration: underlin
   color: var(--pi-text) !important;
   border: 1px solid var(--pi-border) !important;
   border-radius: var(--pi-radius-sm) !important;
+  font-size: var(--pi-fs-base) !important;
   transition: border-color var(--pi-dur-fast) var(--pi-ease),
               box-shadow var(--pi-dur-fast) var(--pi-ease);
 }
@@ -248,6 +249,116 @@ a:hover, a:focus-visible { color: var(--pi-brand-ink); text-decoration: underlin
 input[type="text"]:focus, input[type="number"]:focus {
   border-color: var(--pi-brand) !important;
   box-shadow: 0 0 0 3px var(--pi-brand-soft) !important;
+}
+
+/* ------------------------------------------------------------------- *
+ *  Selector text legibility — manual-review fix
+ * ------------------------------------------------------------------- *
+ * The Dash Dropdown / Slider components inherit light react-select and
+ * rc-slider styles that fall to ~gray against the light surface — hard
+ * to read on a high-density dashboard. These rules push every piece of
+ * selector text to the primary --pi-text color with an explicit weight.
+ */
+
+/* ----- Labels (html.Label above selectors) -------------------------- */
+label, .form-label {
+  color: var(--pi-text) !important;
+  font-weight: 600;
+  font-size: var(--pi-fs-sm);
+  letter-spacing: 0.01em;
+  margin-bottom: var(--pi-sp-2);
+  display: inline-block;
+}
+
+/* ----- Dash Dropdown (react-select) --------------------------------- */
+/* Currently-selected value shown inside the control */
+.Select-control .Select-value-label,
+.Select-control .Select-placeholder,
+.Select-value-label {
+  color: var(--pi-text) !important;
+  font-size: var(--pi-fs-base) !important;
+  font-weight: 500 !important;
+}
+/* Multi-value pills inside multi-select */
+.Select--multi .Select-value {
+  background: var(--pi-brand-soft) !important;
+  color: var(--pi-brand-ink) !important;
+  border: 1px solid var(--pi-brand) !important;
+  border-radius: var(--pi-radius-sm) !important;
+  font-weight: 600;
+}
+.Select--multi .Select-value-icon {
+  border-right: 1px solid var(--pi-brand) !important;
+  color: var(--pi-brand-ink) !important;
+}
+/* Dropdown menu items (the open list) */
+.Select-menu-outer,
+.Select-menu {
+  background: var(--pi-surface) !important;
+  border: 1px solid var(--pi-border) !important;
+  box-shadow: var(--pi-shadow-md) !important;
+}
+.Select-option {
+  color: var(--pi-text) !important;
+  font-size: var(--pi-fs-base) !important;
+  font-weight: 500 !important;
+  background: var(--pi-surface) !important;
+}
+.Select-option.is-focused,
+.Select-option:hover {
+  background: var(--pi-brand-soft) !important;
+  color: var(--pi-brand-ink) !important;
+}
+.Select-option.is-selected {
+  background: var(--pi-brand) !important;
+  color: #fff !important;
+}
+/* Disabled options */
+.Select-option.is-disabled {
+  color: var(--pi-text-subtle) !important;
+}
+
+/* ----- Dash Slider / RangeSlider (rc-slider) ------------------------ */
+.rc-slider-mark-text,
+.rc-slider-mark-text-active {
+  color: var(--pi-text) !important;
+  font-size: var(--pi-fs-sm) !important;
+  font-weight: 500 !important;
+  opacity: 1 !important;
+}
+.rc-slider-mark-text-active {
+  color: var(--pi-brand-ink) !important;
+  font-weight: 700 !important;
+}
+.rc-slider-handle {
+  border-color: var(--pi-brand) !important;
+  background: var(--pi-brand) !important;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--pi-brand-soft) !important;
+}
+.rc-slider-track {
+  background: var(--pi-brand) !important;
+}
+.rc-slider-rail {
+  background: var(--pi-border-strong) !important;
+}
+
+/* ----- Native <input>, <select>, <textarea> ------------------------- */
+select, textarea {
+  color: var(--pi-text) !important;
+  background: var(--pi-surface) !important;
+  border: 1px solid var(--pi-border) !important;
+  border-radius: var(--pi-radius-sm) !important;
+  font-size: var(--pi-fs-base) !important;
+  font-family: var(--pi-font-sans) !important;
+  padding: var(--pi-sp-2) var(--pi-sp-3);
+}
+select:focus, textarea:focus {
+  border-color: var(--pi-brand) !important;
+  box-shadow: 0 0 0 3px var(--pi-brand-soft) !important;
+}
+::placeholder {
+  color: var(--pi-text-muted) !important;
+  opacity: 0.7;
 }
 
 /* Tables */
