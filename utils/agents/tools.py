@@ -158,6 +158,32 @@ def fetch_bea_personal_income(states: list[str], start_year: int, end_year: int)
 
 
 @tool
+def fetch_bls_qcew_state(
+    states: list[str], start_year: int, end_year: int, quarters: list[int] | None = None
+) -> str:
+    """
+    Download BLS QCEW (Quarterly Census of Employment and Wages)
+    state-total rows for the given states and year range. Emits four
+    metrics per (state, quarter): employment level, total quarterly
+    wages, average weekly wage, and establishment count. Use
+    ``quarters=[1,2,3,4]`` to restrict (defaults to all four). No API
+    key required — the QCEW CSV endpoint is unauthenticated.
+    """
+    from utils.fetch_qcew_data import fetch_qcew_state_totals  # noqa: PLC0415
+
+    codes = _normalize_states(states)
+    _validate_year_range(start_year, end_year)
+    written = fetch_qcew_state_totals(
+        codes, start_year, end_year, quarters=quarters
+    )
+    return (
+        f"Fetched BLS QCEW state totals for {len(codes)} state(s): "
+        f"{', '.join(codes)} over {start_year}-{end_year}; "
+        f"{written} rows written."
+    )
+
+
+@tool
 def fetch_bls_jolts(
     series_ids: list[str] | None, start_year: int, end_year: int
 ) -> str:
@@ -260,6 +286,7 @@ ALL_TOOLS: tuple["BaseTool", ...] = (
     fetch_fred_state_indicator,
     fetch_bls_regional_cpi,
     fetch_bls_jolts,
+    fetch_bls_qcew_state,
     ensure_merged_data,
     describe_series,
 )

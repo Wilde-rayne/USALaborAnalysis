@@ -287,6 +287,20 @@ SOURCES: tuple[DataSource, ...] = (
             "are the canonical tightness indicators."
         ),
     ),
+    DataSource(
+        "bls_qcew",
+        "BLS Quarterly Census of Employment and Wages (QCEW)",
+        "https://www.bls.gov/cew/",
+        api_available=True,
+        description=(
+            "State-level quarterly employment level, total wages, "
+            "average weekly wage, and establishment count — the most "
+            "complete payroll file BLS publishes (UI-covered jobs). "
+            "Fetched from the CSV data-slice endpoint, 1990-present. "
+            "Closes the wage story: BLS CES gives headcount, BEA gives "
+            "per-capita income, QCEW gives average wage per worker."
+        ),
+    ),
 )
 
 
