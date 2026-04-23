@@ -270,20 +270,6 @@ def render_layout():
                 className="mb-3",
             ),
             dcc.Loading(id="loading-super", children=html.Div(id="super-output")),
-            html.Hr(),
-            html.H6("Ask the AI Assistant"),
-            dcc.Input(
-                id="super-chat-input",
-                type="text",
-                placeholder="Ask a question about this forecast...",
-                style={"width": "80%"},
-            ),
-            html.Button(
-                "Submit",
-                id="super-chat-button",
-                className="btn btn-outline-primary btn-sm ml-2",
-            ),
-            html.Div(id="super-chat-output", className="mt-3"),
         ]
     )
 
@@ -381,19 +367,4 @@ def register_callbacks(app):
             ]
         )
 
-    @app.callback(
-        Output("super-chat-output", "children"),
-        Input("super-chat-button", "n_clicks"),
-        State("super-chat-input", "value"),
-    )
-    @error_boundary(fallback_id="super-chat-output")
-    def update_super_chat(n_clicks, query):
-        if not n_clicks or not query:
-            raise PreventUpdate
-        answer = generate_insight(query)
-        return html.Div(
-            [
-                dcc.Markdown(answer),
-                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
-            ]
-        )
+    # Chat lives in the global chat drawer now — registered in app.py.

@@ -217,18 +217,6 @@ def render_layout():
                 className="mb-3",
             ),
             dcc.Loading(id="loading-lfp", children=html.Div(id="lfp-output")),
-            html.Hr(),
-            html.H6("Ask the AI Assistant"),
-            dcc.Input(
-                id="lfp-chat-input",
-                type="text",
-                placeholder="Ask a question about the forecast...",
-                style={"width": "80%"},
-            ),
-            html.Button(
-                "Submit", id="lfp-chat-button", className="btn btn-outline-primary btn-sm ml-2"
-            ),
-            html.Div(id="lfp-chat-output", className="mt-3"),
         ]
     )
 
@@ -358,19 +346,4 @@ def register_callbacks(app):
             ]
         )
 
-    @app.callback(
-        Output("lfp-chat-output", "children"),
-        Input("lfp-chat-button", "n_clicks"),
-        State("lfp-chat-input", "value"),
-    )
-    @error_boundary(fallback_id="lfp-chat-output")
-    def update_lfp_chat(n_clicks, query):
-        if not n_clicks or not query:
-            raise PreventUpdate
-        answer = generate_insight(query)
-        return html.Div(
-            [
-                dcc.Markdown(answer),
-                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
-            ]
-        )
+    # Chat lives in the global chat drawer now — registered in app.py.

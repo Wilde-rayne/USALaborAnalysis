@@ -164,43 +164,10 @@ def render_layout():
                 open=False,
                 className="mb-4",
             ),
-            html.Hr(),
-            html.H6("Ask the AI Assistant"),
-            html.Label(
-                "Your question",
-                htmlFor="about-chat-input",
-                className="visually-hidden",
-            ),
-            dcc.Input(
-                id="about-chat-input",
-                type="text",
-                placeholder="Ask about the data, forecasts, or architecture…",
-                style={"width": "80%"},
-            ),
-            html.Button(
-                "Submit",
-                id="about-chat-button",
-                className="btn btn-outline-primary btn-sm ml-2",
-                **{"aria-label": "Submit chat question"},
-            ),
-            html.Div(id="about-chat-output", className="mt-3"),
         ],
     )
 
 
 def register_callbacks(app):
-    @app.callback(
-        Output("about-chat-output", "children"),
-        Input("about-chat-button", "n_clicks"),
-        State("about-chat-input", "value"),
-    )
-    def update_about_chat(n_clicks, query):
-        if not n_clicks or not query:
-            raise PreventUpdate
-        answer = generate_insight(query, active_tab="about")
-        return html.Div(
-            [
-                dcc.Markdown(answer),
-                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
-            ]
-        )
+    # Chat lives in the global chat drawer now — registered in app.py.
+    pass

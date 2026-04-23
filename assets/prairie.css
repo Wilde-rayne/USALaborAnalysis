@@ -405,10 +405,141 @@ select:focus, textarea:focus {
   border-color: #f4c5c5;
 }
 
-/* Chat input strip */
-#eda-chat-input, #lfp-chat-input, #super-chat-input, #about-chat-input {
-  width: 80%;
-  margin-right: var(--pi-sp-3);
+/* ------------------------------------------------------------------- *
+ *  Chat drawer — floating right-side panel + FAB toggle
+ * ------------------------------------------------------------------- */
+.pi-chat-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+  border: none;
+  border-radius: 999px;
+  padding: 0.75rem 1.25rem;
+  font-size: var(--pi-fs-base);
+  font-weight: 600;
+  color: #fff;
+  background: var(--pi-brand);
+  box-shadow: 0 6px 24px rgba(43, 79, 129, 0.35);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pi-sp-2);
+  transition: transform var(--pi-dur-fast) var(--pi-ease),
+              box-shadow var(--pi-dur-fast) var(--pi-ease);
+}
+.pi-chat-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(43, 79, 129, 0.45);
+  background: var(--pi-brand-ink);
+}
+.pi-chat-fab:focus-visible {
+  outline: 3px solid var(--pi-brand-soft);
+  outline-offset: 2px;
+}
+.pi-chat-fab .pi-chat-fab-icon { font-size: 1.15rem; line-height: 1; }
+
+.pi-chat-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(420px, 92vw);
+  background: var(--pi-surface);
+  border-left: 1px solid var(--pi-border);
+  box-shadow: -4px 0 24px rgba(16, 24, 40, 0.12);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(0);
+  transition: transform var(--pi-dur-base) var(--pi-ease);
+}
+.pi-chat-drawer.pi-chat-drawer-closed {
+  transform: translateX(100%);
+}
+.pi-chat-drawer-header {
+  padding: var(--pi-sp-4);
+  border-bottom: 1px solid var(--pi-border);
+  background: var(--pi-surface-alt);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pi-chat-drawer-header h5 {
+  margin: 0;
+  color: var(--pi-text);
+}
+.pi-chat-drawer-header .pi-chat-context {
+  display: block;
+  font-size: var(--pi-fs-xs);
+  color: var(--pi-text-muted);
+  margin-top: 2px;
+}
+.pi-chat-drawer-close {
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--pi-text-muted);
+  cursor: pointer;
+  padding: 0 var(--pi-sp-2);
+  border-radius: var(--pi-radius-sm);
+}
+.pi-chat-drawer-close:hover { background: var(--pi-border); color: var(--pi-text); }
+
+.pi-chat-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--pi-sp-4);
+}
+.pi-chat-empty {
+  color: var(--pi-text-muted);
+  font-size: var(--pi-fs-sm);
+  text-align: center;
+  margin-top: var(--pi-sp-6);
+}
+.pi-chat-bubble {
+  padding: var(--pi-sp-3);
+  border-radius: var(--pi-radius-md);
+  margin-bottom: var(--pi-sp-3);
+  font-size: var(--pi-fs-sm);
+  line-height: var(--pi-lh-base);
+  max-width: 92%;
+}
+.pi-chat-bubble-user {
+  background: var(--pi-brand-soft);
+  color: var(--pi-brand-ink);
+  margin-left: auto;
+  border: 1px solid var(--pi-brand);
+}
+.pi-chat-bubble-assistant {
+  background: var(--pi-surface-alt);
+  color: var(--pi-text);
+  border: 1px solid var(--pi-border);
+}
+
+.pi-chat-drawer-footer {
+  border-top: 1px solid var(--pi-border);
+  padding: var(--pi-sp-3);
+  display: flex;
+  gap: var(--pi-sp-2);
+  align-items: flex-end;
+  background: var(--pi-surface);
+}
+.pi-chat-drawer-footer textarea {
+  flex: 1;
+  min-height: 64px;
+  max-height: 160px;
+  resize: vertical;
+  font-size: var(--pi-fs-sm);
+}
+#chat-drawer-submit {
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .pi-chat-drawer { width: 100vw; }
+  .pi-chat-fab { bottom: 16px; right: 16px; padding: 0.6rem 1rem; }
 }
 
 

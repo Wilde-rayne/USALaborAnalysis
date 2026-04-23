@@ -260,6 +260,10 @@ def _status_children() -> list:
     ]
 
 
+from tabs._chat_drawer import render_drawer as _render_chat_drawer  # noqa: E402
+from tabs._chat_drawer import register_callbacks as _register_chat_drawer  # noqa: E402
+
+
 app.layout = html.Div(
     [
         dbc.NavbarSimple(
@@ -285,6 +289,8 @@ app.layout = html.Div(
             ],
             className="pi-page",
         ),
+        # One-shot chat drawer — replaces the per-tab chat strips.
+        _render_chat_drawer(),
     ]
 )
 
@@ -307,6 +313,8 @@ def _refresh_status(_n):
 def register_all_callbacks(app):
     for m in tabs.values():
         m.register_callbacks(app)
+    _register_chat_drawer(app)
+
 
 register_all_callbacks(app)
 

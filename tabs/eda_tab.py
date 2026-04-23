@@ -60,17 +60,6 @@ def render_layout():
             ),
 
             dcc.Loading(id="loading-eda", children=html.Div(id="eda-output")),
-
-            html.Hr(),
-            html.H6("Ask the AI Assistant"),
-            dcc.Input(
-                id="eda-chat-input",
-                type="text",
-                placeholder="Ask a question about this data...",
-                style={"width": "80%"}
-            ),
-            html.Button("Submit", id="eda-chat-button", className="btn btn-outline-primary btn-sm ml-2"),
-            html.Div(id="eda-chat-output", className="mt-3")
         ],
         className="p-4",
     )
@@ -221,16 +210,4 @@ def register_callbacks(app):
             ]
         )
 
-    @app.callback(
-        Output("eda-chat-output", "children"),
-        Input("eda-chat-button", "n_clicks"),
-        State("eda-chat-input", "value")
-    )
-    def update_eda_chat(n_clicks, query):
-        if not n_clicks or not query:
-            raise PreventUpdate
-        answer = generate_insight(query, timeout=DEFAULT_TIMEOUT)
-        return html.Div([
-            dcc.Markdown(answer),
-            dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._")
-        ])
+    # Chat lives in the global chat drawer now — registered in app.py.
