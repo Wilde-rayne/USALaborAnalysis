@@ -6,9 +6,9 @@ import plotly.graph_objs as go
 from dash import html, dcc, Input, Output, State
 from dash.exceptions import PreventUpdate
 
-from utils.data_pipeline import OUTPUT_JSON, refresh_all
+from utils.data_pipeline import OUTPUT_JSON, ensure_data
 from utils.llm_utils import generate_insight
-from utils.constants import ALL_STATES, YEARS, MONTH_MAP, DEFAULT_TIMEOUT
+from utils.constants import ALL_STATES, END_YEAR, MONTH_MAP, START_YEAR, YEARS, DEFAULT_TIMEOUT
 
 
 def render_layout():
@@ -116,9 +116,13 @@ def register_callbacks(app):
         if active_tab != "eda":
             raise PreventUpdate
 
+        # "Refresh Data" forces a full-scope pull — ALL_STATES and the
+        # project's full START_YEAR..END_YEAR — regardless of the user's
+        # display filters. Letting a narrow UI slice rewrite the shared
+        # panel would shrink the data the LFP and Super tabs rely on.
+        # The display-time filters below still honor the user's selection.
         if n_clicks:
-            start_year, end_year = year_range
-            refresh_all(states, start_year, end_year)
+            ensure_data(ALL_STATES, START_YEAR, END_YEAR, force=True)
 
         if not os.path.exists(OUTPUT_JSON):
             return html.Div("No data found. Please refresh.", className="text-danger")
