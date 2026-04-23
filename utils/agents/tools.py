@@ -158,6 +158,33 @@ def fetch_bea_personal_income(states: list[str], start_year: int, end_year: int)
 
 
 @tool
+def fetch_bls_jolts(
+    series_ids: list[str] | None, start_year: int, end_year: int
+) -> str:
+    """
+    Download BLS JOLTS (Job Openings and Labor Turnover Survey) rows.
+    Pass ``None`` or an empty list to fetch the national preset —
+    total nonfarm openings / hires / quits / layoffs / separations,
+    seasonally adjusted, monthly from 2000. Pass an explicit list of
+    series ids (including BLS's experimental state-JOLTS codes) for a
+    targeted pull. Uses the existing BLS_API_KEY.
+    """
+    from utils.fetch_jolts_data import (  # noqa: PLC0415
+        NATIONAL_JOLTS_SERIES,
+        fetch_jolts,
+    )
+
+    if not series_ids:
+        series_ids = list(NATIONAL_JOLTS_SERIES)
+    _validate_year_range(start_year, end_year)
+    written = fetch_jolts(series_ids, start_year, end_year)
+    return (
+        f"Fetched BLS JOLTS for {len(series_ids)} series over "
+        f"{start_year}-{end_year}; {written} monthly rows written."
+    )
+
+
+@tool
 def fetch_bls_regional_cpi(
     regions: list[str] | None, start_year: int, end_year: int
 ) -> str:
@@ -230,6 +257,7 @@ ALL_TOOLS: tuple["BaseTool", ...] = (
     fetch_bea_personal_income,
     fetch_fred_state_indicator,
     fetch_bls_regional_cpi,
+    fetch_bls_jolts,
     ensure_merged_data,
     describe_series,
 )

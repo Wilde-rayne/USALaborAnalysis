@@ -273,6 +273,20 @@ SOURCES: tuple[DataSource, ...] = (
             "against 2024-vintage ones."
         ),
     ),
+    DataSource(
+        "bls_jolts",
+        "BLS Job Openings and Labor Turnover Survey (JOLTS)",
+        "https://www.bls.gov/jlt/",
+        api_available=True,
+        description=(
+            "Monthly job openings, hires, quits, layoffs, and total "
+            "separations at national scope (2000-12–present); "
+            "experimental state-level series (JTS State) available for "
+            "recent periods. Direct input to the Super tab's "
+            "site-selection story — openings-per-hire and quits-rate "
+            "are the canonical tightness indicators."
+        ),
+    ),
 )
 
 

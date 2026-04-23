@@ -24,8 +24,8 @@ from utils.agents import tools as tools_mod  # noqa: E402
 # Tool registry metadata
 # --------------------------------------------------------------------------
 class TestToolRegistry:
-    def test_exposes_eight_tools_by_default(self) -> None:
-        assert len(tools_mod.ALL_TOOLS) == 8
+    def test_exposes_nine_tools_by_default(self) -> None:
+        assert len(tools_mod.ALL_TOOLS) == 9
         names = {t.name for t in tools_mod.ALL_TOOLS}
         assert names == {
             "fetch_bls_ces",
@@ -34,6 +34,7 @@ class TestToolRegistry:
             "fetch_bea_personal_income",
             "fetch_fred_state_indicator",
             "fetch_bls_regional_cpi",
+            "fetch_bls_jolts",
             "ensure_merged_data",
             "describe_series",
         }
