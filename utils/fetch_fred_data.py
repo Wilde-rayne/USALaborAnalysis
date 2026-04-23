@@ -28,10 +28,16 @@ FRED_API_URL = "https://api.stlouisfed.org/fred/series/observations"
 #: Indicator suffix → (description, period-code-BLS-style).
 #: The period code is stored in the output so the merger can line up
 #: FRED rows with BLS monthly series that use M01..M12.
+#:
+#: All four indicators follow FRED's ``{STATE}{INDICATOR}`` naming:
+#: e.g. ``IAUR`` (Iowa unemployment rate), ``IAPI`` (Iowa personal
+#: income), ``IANGSP`` (Iowa nominal gross state product),
+#: ``IASTHPI`` (Iowa FHFA all-transactions house price index).
 FRED_INDICATORS: dict[str, tuple[str, str]] = {
-    "UR":   ("unemployment rate",        "monthly"),
-    "PI":   ("personal income",          "quarterly"),
-    "NGSP": ("nominal gross state product", "annual"),
+    "UR":    ("unemployment rate",                   "monthly"),
+    "PI":    ("personal income",                     "quarterly"),
+    "NGSP":  ("nominal gross state product",         "annual"),
+    "STHPI": ("FHFA state house price index",        "quarterly"),
 }
 
 RAW_DIR_DEFAULT = os.path.join("data", "raw", "fred")

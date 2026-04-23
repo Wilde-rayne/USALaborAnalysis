@@ -65,6 +65,22 @@ class TestSeriesIdConstruction:
     def test_id_is_state_plus_indicator(self) -> None:
         assert fetch_fred_data._fred_series_id("IA", "UR") == "IAUR"
         assert fetch_fred_data._fred_series_id("MI", "PI") == "MIPI"
+        # STHPI: FHFA state house price index through FRED.
+        assert fetch_fred_data._fred_series_id("CA", "STHPI") == "CASTHPI"
+
+
+class TestIndicatorRegistry:
+    def test_registry_includes_housing(self) -> None:
+        assert "STHPI" in fetch_fred_data.FRED_INDICATORS
+        desc, cadence = fetch_fred_data.FRED_INDICATORS["STHPI"]
+        assert "house price" in desc.lower()
+        assert cadence == "quarterly"
+
+    def test_every_indicator_has_cadence_the_period_mapper_accepts(self) -> None:
+        for ind, (_, cadence) in fetch_fred_data.FRED_INDICATORS.items():
+            # Must not raise and must return a non-empty period code.
+            got = fetch_fred_data._bls_period_from_date("2020-04-01", cadence)
+            assert got and got[:1] in {"M", "Q", "A"}, ind
 
 
 class TestPeriodMapping:
