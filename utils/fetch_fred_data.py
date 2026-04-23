@@ -25,19 +25,23 @@ logger = logging.getLogger(__name__)
 
 FRED_API_URL = "https://api.stlouisfed.org/fred/series/observations"
 
-#: Indicator suffix → (description, period-code-BLS-style).
-#: The period code is stored in the output so the merger can line up
-#: FRED rows with BLS monthly series that use M01..M12.
+#: Indicator key → (description, cadence, template).
 #:
-#: All four indicators follow FRED's ``{STATE}{INDICATOR}`` naming:
-#: e.g. ``IAUR`` (Iowa unemployment rate), ``IAPI`` (Iowa personal
-#: income), ``IANGSP`` (Iowa nominal gross state product),
-#: ``IASTHPI`` (Iowa FHFA all-transactions house price index).
-FRED_INDICATORS: dict[str, tuple[str, str]] = {
-    "UR":    ("unemployment rate",                   "monthly"),
-    "PI":    ("personal income",                     "quarterly"),
-    "NGSP":  ("nominal gross state product",         "annual"),
-    "STHPI": ("FHFA state house price index",        "quarterly"),
+#: The ``template`` string is ``format``-ted with ``st=<2-letter code>``
+#: to build a FRED series id. Most FRED state series follow
+#: ``{st}{ind}`` (e.g. ``IAUR``) but some — notably the state
+#: median-household-income family — put the state code in the middle
+#: (``MEHOINUSIAA646N``). Templating lets both patterns coexist
+#: behind one fetcher rather than forking another module.
+#:
+#: Cadence strings drive the BLS-style period mapping in
+#: ``_bls_period_from_date``.
+FRED_INDICATORS: dict[str, tuple[str, str, str]] = {
+    "UR":    ("unemployment rate",              "monthly",   "{st}UR"),
+    "PI":    ("personal income",                "quarterly", "{st}PI"),
+    "NGSP":  ("nominal gross state product",    "annual",    "{st}NGSP"),
+    "STHPI": ("FHFA state house price index",   "quarterly", "{st}STHPI"),
+    "MHI":   ("median household income",        "annual",    "MEHOINUS{st}A646N"),
 }
 
 RAW_DIR_DEFAULT = os.path.join("data", "raw", "fred")
@@ -48,7 +52,11 @@ def _api_key() -> str | None:
 
 
 def _fred_series_id(state_code: str, indicator: str) -> str:
-    """FRED state-level convention: '<ST><IND>', e.g. 'IAUR'."""
+    """
+    Build a FRED state-level series id from the ontology state code and
+    indicator key. Uses the templated ``{st}`` placeholder from
+    :data:`FRED_INDICATORS` so state code position is data, not code.
+    """
     if state_code not in ONTOLOGY.states:
         raise ValueError(f"unknown state code: {state_code!r}")
     if indicator not in FRED_INDICATORS:
@@ -56,7 +64,8 @@ def _fred_series_id(state_code: str, indicator: str) -> str:
             f"unknown FRED indicator: {indicator!r}; supported: "
             f"{sorted(FRED_INDICATORS)}"
         )
-    return f"{state_code}{indicator}"
+    _desc, _cadence, template = FRED_INDICATORS[indicator]
+    return template.format(st=state_code)
 
 
 def _bls_period_from_date(date_str: str, cadence: str) -> str:
@@ -115,7 +124,7 @@ def fetch_fred_state_series(
         raise ValueError(f"unknown state codes: {unknown}")
 
     Path(raw_dir).mkdir(parents=True, exist_ok=True)
-    _, cadence = FRED_INDICATORS[indicator]
+    _desc, cadence, _template = FRED_INDICATORS[indicator]
 
     total_rows = 0
     for code in codes:

@@ -220,12 +220,14 @@ def fetch_fred_state_indicator(
     """
     Download a FRED state-level indicator family. ``indicator`` must be
     one of: "UR" (unemployment rate, monthly), "PI" (personal income,
-    quarterly), "NGSP" (nominal gross state product, annual), or
-    "STHPI" (FHFA all-transactions state house price index,
-    quarterly — 1975Q1-present; useful as a housing-cost companion to
-    the labor-force series). Writes data/raw/fred/FRED_<ST><IND>.txt
-    files. Requires ``FRED_API_KEY`` env; register at
-    https://fred.stlouisfed.org/docs/api/api_key.html.
+    quarterly), "NGSP" (nominal gross state product, annual), "STHPI"
+    (FHFA all-transactions state house price index, quarterly —
+    1975Q1-present), or "MHI" (state median household income, annual —
+    FRED series ``MEHOINUS{ST}A646N``, 1984-present, useful as a
+    real-household-earnings companion to BEA per-capita and BLS
+    earnings-per-hour measures). Writes
+    data/raw/fred/FRED_<series_id>.txt files. Requires ``FRED_API_KEY``
+    env; register at https://fred.stlouisfed.org/docs/api/api_key.html.
     """
     from utils.fetch_fred_data import (  # noqa: PLC0415
         FRED_INDICATORS,

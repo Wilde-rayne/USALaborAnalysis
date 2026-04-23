@@ -62,25 +62,45 @@ class TestValidation:
 
 
 class TestSeriesIdConstruction:
-    def test_id_is_state_plus_indicator(self) -> None:
+    def test_tail_pattern_state_plus_indicator(self) -> None:
+        # Classic "{ST}{IND}" pattern used by UR / PI / NGSP / STHPI.
         assert fetch_fred_data._fred_series_id("IA", "UR") == "IAUR"
         assert fetch_fred_data._fred_series_id("MI", "PI") == "MIPI"
-        # STHPI: FHFA state house price index through FRED.
         assert fetch_fred_data._fred_series_id("CA", "STHPI") == "CASTHPI"
+
+    def test_infix_pattern_median_household_income(self) -> None:
+        """MHI: state code sits in the middle of MEHOINUS{ST}A646N."""
+        assert fetch_fred_data._fred_series_id("IA", "MHI") == "MEHOINUSIAA646N"
+        assert fetch_fred_data._fred_series_id("CA", "MHI") == "MEHOINUSCAA646N"
 
 
 class TestIndicatorRegistry:
     def test_registry_includes_housing(self) -> None:
         assert "STHPI" in fetch_fred_data.FRED_INDICATORS
-        desc, cadence = fetch_fred_data.FRED_INDICATORS["STHPI"]
+        desc, cadence, template = fetch_fred_data.FRED_INDICATORS["STHPI"]
         assert "house price" in desc.lower()
         assert cadence == "quarterly"
+        assert "{st}" in template
+
+    def test_registry_includes_median_income(self) -> None:
+        assert "MHI" in fetch_fred_data.FRED_INDICATORS
+        desc, cadence, template = fetch_fred_data.FRED_INDICATORS["MHI"]
+        assert "median household income" in desc.lower()
+        assert cadence == "annual"
+        assert "MEHOINUS" in template
 
     def test_every_indicator_has_cadence_the_period_mapper_accepts(self) -> None:
-        for ind, (_, cadence) in fetch_fred_data.FRED_INDICATORS.items():
-            # Must not raise and must return a non-empty period code.
+        for ind, (_, cadence, _tpl) in fetch_fred_data.FRED_INDICATORS.items():
             got = fetch_fred_data._bls_period_from_date("2020-04-01", cadence)
             assert got and got[:1] in {"M", "Q", "A"}, ind
+
+    def test_every_template_renders_a_valid_id(self) -> None:
+        for ind, (_, _, template) in fetch_fred_data.FRED_INDICATORS.items():
+            sid = template.format(st="IA")
+            # All FRED ids used here are alphanumeric-only.
+            assert sid.isalnum(), (ind, sid)
+            # Must include the state code we fed in.
+            assert "IA" in sid, (ind, sid)
 
 
 class TestPeriodMapping:
