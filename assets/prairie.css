@@ -556,6 +556,72 @@ select:focus, textarea:focus {
   .pi-selector-grid { grid-template-columns: 1fr; }
 }
 
+/* ------------------------------------------------------------------- *
+ *  Methodology + references panel (I6)
+ * ------------------------------------------------------------------- */
+.pi-method-panel {
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-md);
+  padding: var(--pi-sp-3) var(--pi-sp-4);
+  margin-top: var(--pi-sp-3);
+}
+.pi-method-summary {
+  font-weight: 600;
+  color: var(--pi-text);
+  cursor: pointer;
+  padding: var(--pi-sp-2) 0;
+  list-style: none;
+  position: relative;
+  padding-left: 1.4rem;
+}
+.pi-method-summary::before {
+  content: "▶";
+  color: var(--pi-brand);
+  font-size: 0.7rem;
+  position: absolute;
+  left: 0;
+  top: 0.7rem;
+  transition: transform var(--pi-dur-fast) var(--pi-ease);
+}
+.pi-method-panel[open] .pi-method-summary::before {
+  transform: rotate(90deg);
+}
+.pi-method-body {
+  padding-top: var(--pi-sp-3);
+  border-top: 1px solid var(--pi-border);
+  margin-top: var(--pi-sp-2);
+}
+.pi-method-body h6 {
+  margin-top: var(--pi-sp-4);
+  color: var(--pi-brand-ink);
+  font-size: var(--pi-fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.pi-method-body h6:first-child { margin-top: 0; }
+.pi-method-list {
+  padding-left: 1.3rem;
+  margin-bottom: var(--pi-sp-2);
+}
+.pi-method-list li {
+  margin-bottom: var(--pi-sp-2);
+  line-height: var(--pi-lh-base);
+}
+.pi-method-refs {
+  padding-left: 1.5rem;
+  font-size: var(--pi-fs-sm);
+  color: var(--pi-text-muted);
+}
+.pi-method-refs li {
+  margin-bottom: var(--pi-sp-2);
+  line-height: var(--pi-lh-base);
+}
+.pi-method-refs a {
+  color: var(--pi-brand);
+  word-break: break-all;
+}
+
 
 /* ------------------------------------------------------------------- *
  *  5. Utilities — pill, status, skeletons

@@ -23,6 +23,7 @@ from utils.forecasting.models import default_candidates
 from utils.llm_utils import generate_insight
 from utils.ontology import ONTOLOGY
 from tabs._components import error_boundary
+from tabs._methodology import methodology_panel
 
 # Region options offered in the filter. Territories are grouped under
 # "Pacific" + "Caribbean" per the ontology; "All" shows whatever
@@ -529,6 +530,8 @@ def register_callbacks(app):
                 html.Hr(),
                 dcc.Markdown(insight),
                 dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
+                html.Hr(),
+                methodology_panel(),
             ]
         )
 

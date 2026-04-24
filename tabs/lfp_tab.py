@@ -24,6 +24,7 @@ from utils.forecasting.trend import (
     summarize_trend,
 )
 from utils.llm_utils import generate_insight
+from tabs._methodology import methodology_panel
 from tabs._components import error_boundary
 
 logger = logging.getLogger(__name__)
@@ -345,6 +346,8 @@ def register_callbacks(app):
                 html.Hr(),
                 dcc.Markdown(insight),
                 dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
+                html.Hr(),
+                methodology_panel(),
             ]
         )
 
