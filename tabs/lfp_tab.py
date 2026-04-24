@@ -195,10 +195,12 @@ def render_layout():
         [
             html.H5("Labor Force Participation Forecast"),
             html.P(
-                "Each run fits Naive, Seasonal-Naive, and Holt-Winters (ETS) "
-                "through a 3-fold expanding-window backtest, then picks the "
-                "model with the lowest out-of-sample RMSE and reports its "
-                "stationarity and residual diagnostics alongside the chart.",
+                "Each run fits Naive, Seasonal-Naive, Holt-Winters (ETS), "
+                "and ARIMA (small-grid AIC selection) through a 3-fold "
+                "expanding-window backtest, then picks the model with the "
+                "lowest out-of-sample RMSE. The chart shows the winning "
+                "forecast with a 95 % prediction interval and the rationale "
+                "table lists every candidate's fold-averaged score.",
                 className="text-muted small",
             ),
             html.Div(

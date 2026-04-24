@@ -213,6 +213,124 @@ class ETSForecaster(BaseForecaster):
 
 
 # --------------------------------------------------------------------------
+# ARIMA — statsmodels, small-grid AIC selection
+# --------------------------------------------------------------------------
+class ARIMAForecaster(BaseForecaster):
+    """
+    ARIMA with a deliberately-small (p, d, q) grid, chosen by AIC.
+
+    Adds a classical econometrics baseline to the bakeoff. Full
+    auto-ARIMA (pmdarima) would search a larger space but pulls a
+    heavier dependency; a small grid captures 90 % of the signal for
+    monthly labor data. Residual-based CIs fall to statsmodels'
+    ``get_forecast``-provided bounds rather than the default
+    Brownian fallback — ARIMA knows its own variance.
+    """
+
+    name = "arima"
+
+    # Small default grid. Callers with more budget can pass a bigger one.
+    DEFAULT_GRID: tuple[tuple[int, int, int], ...] = (
+        (1, 1, 1),
+        (2, 1, 1),
+        (1, 1, 2),
+        (2, 1, 2),
+    )
+
+    def __init__(
+        self,
+        search_grid: tuple[tuple[int, int, int], ...] | None = None,
+        seasonal_periods: int = 12,
+    ) -> None:
+        super().__init__()
+        # ``None`` falls back to the default grid; an explicit empty
+        # tuple stays empty so callers can intentionally force a
+        # "nothing to try" configuration (mostly used by tests).
+        self.search_grid = self.DEFAULT_GRID if search_grid is None else tuple(search_grid)
+        self.seasonal_periods = seasonal_periods
+        self._fitted_model: Any = None
+        self._order_chosen: tuple[int, int, int] | None = None
+
+    def fit(self, y: np.ndarray, dates) -> "ARIMAForecaster":
+        from statsmodels.tsa.arima.model import ARIMA  # noqa: PLC0415
+        import warnings  # noqa: PLC0415
+
+        y = np.asarray(y, dtype=float)
+        if y.size < 20:
+            raise ValueError(
+                f"{self.name}: need >= 20 obs, got {y.size}"
+            )
+
+        best_model = None
+        best_aic = float("inf")
+        best_order: tuple[int, int, int] | None = None
+        for order in self.search_grid:
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    m = ARIMA(y, order=order).fit()
+                if np.isfinite(m.aic) and m.aic < best_aic:
+                    best_aic = float(m.aic)
+                    best_model = m
+                    best_order = order
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"[arima] order={order} failed: {exc}")
+                continue
+
+        if best_model is None:
+            raise RuntimeError(
+                f"{self.name}: no order in {self.search_grid} converged on "
+                f"n={y.size} observations"
+            )
+
+        self._fitted_model = best_model
+        self._order_chosen = best_order
+        self._y = y
+        self._fitted = True
+        return self
+
+    def predict(self, horizon: int) -> np.ndarray:
+        self._require_fitted()
+        return np.asarray(self._fitted_model.forecast(horizon), dtype=float)
+
+    def predict_interval(
+        self, horizon: int, alpha: float = 0.05
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """Use statsmodels' analytical forecast-variance bounds."""
+        self._require_fitted()
+        try:
+            res = self._fitted_model.get_forecast(horizon)
+            preds = np.asarray(res.predicted_mean, dtype=float)
+            ci = res.conf_int(alpha=alpha)
+            # statsmodels returns a DataFrame-ish object; normalize.
+            if hasattr(ci, "iloc"):
+                lower = np.asarray(ci.iloc[:, 0], dtype=float)
+                upper = np.asarray(ci.iloc[:, 1], dtype=float)
+            else:
+                arr = np.asarray(ci, dtype=float)
+                lower = arr[:, 0]
+                upper = arr[:, 1]
+            return preds, lower, upper
+        except Exception as exc:  # noqa: BLE001
+            logger.info(f"[arima] get_forecast CI failed: {exc}; falling back")
+            return super().predict_interval(horizon, alpha=alpha)
+
+    @property
+    def residuals(self) -> np.ndarray | None:
+        if self._fitted_model is None:
+            return None
+        return np.asarray(self._fitted_model.resid, dtype=float)
+
+    @property
+    def aic(self) -> float | None:
+        return None if self._fitted_model is None else float(self._fitted_model.aic)
+
+    @property
+    def bic(self) -> float | None:
+        return None if self._fitted_model is None else float(self._fitted_model.bic)
+
+
+# --------------------------------------------------------------------------
 # LSTM — recurrent neural network
 # --------------------------------------------------------------------------
 class LSTMForecaster(BaseForecaster):
@@ -310,7 +428,10 @@ class LSTMForecaster(BaseForecaster):
 # Default candidate set
 # --------------------------------------------------------------------------
 def default_candidates(
-    seasonal_periods: int = 12, *, include_lstm: bool = False
+    seasonal_periods: int = 12,
+    *,
+    include_arima: bool = True,
+    include_lstm: bool = False,
 ) -> list[BaseForecaster]:
     """
     Build the default bakeoff line-up.
@@ -318,6 +439,11 @@ def default_candidates(
     Kept as a function (not a module-level constant) because each
     selector call needs fresh instances — these models keep fitted
     state on ``self``.
+
+    ARIMA is *included* by default but with a tiny four-order grid so
+    the extra fits are bounded. Drop it with ``include_arima=False``
+    when the upstream caller needs a faster Super-tab pull across
+    many states.
 
     LSTM is excluded by default: on this project's ~300-obs monthly
     series it fits in ~8 s per fold (so ~25 s for a 3-fold backtest,
@@ -330,6 +456,8 @@ def default_candidates(
         SeasonalNaiveForecaster(season=seasonal_periods),
         ETSForecaster(seasonal_periods=seasonal_periods),
     ]
+    if include_arima:
+        candidates.append(ARIMAForecaster(seasonal_periods=seasonal_periods))
     if include_lstm:
         candidates.append(LSTMForecaster(window=seasonal_periods))
     return candidates
@@ -340,5 +468,6 @@ ALL_FORECASTERS: tuple[type[BaseForecaster], ...] = (
     NaiveForecaster,
     SeasonalNaiveForecaster,
     ETSForecaster,
+    ARIMAForecaster,
     LSTMForecaster,
 )

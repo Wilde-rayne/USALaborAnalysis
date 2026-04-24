@@ -19,6 +19,7 @@ from dash.exceptions import PreventUpdate
 from utils.constants import ALL_STATES, MONTH_MAP, SUPERSECTORS
 from utils.data_pipeline import OUTPUT_JSON, ensure_data
 from utils.forecasting import ForecastResult, select_forecaster
+from utils.forecasting.models import default_candidates
 from utils.llm_utils import generate_insight
 from utils.ontology import ONTOLOGY
 from tabs._components import error_boundary
@@ -87,7 +88,16 @@ def _get_or_train_supersector(
         y = sub[col].astype(float).to_numpy()
         dates = sub["date"].to_numpy()
         try:
-            result = select_forecaster(y, dates=dates, horizon=horizon, n_folds=3)
+            # Skip ARIMA on Super — this loop runs 12+ bakeoffs and the
+            # ARIMA grid search would push cold-click latency past a
+            # minute per sector. LFP keeps ARIMA (only 2 series).
+            result = select_forecaster(
+                y,
+                dates=dates,
+                horizon=horizon,
+                n_folds=3,
+                candidates=default_candidates(include_arima=False),
+            )
         except RuntimeError as exc:
             logger.warning(f"[SUPER] bakeoff failed for {col}: {exc}")
             continue

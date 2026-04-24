@@ -31,6 +31,7 @@ from utils.forecasting.base import (
 )
 from utils.forecasting.models import (
     ALL_FORECASTERS,
+    ARIMAForecaster,
     ETSForecaster,
     LSTMForecaster,
     NaiveForecaster,
@@ -40,6 +41,7 @@ from utils.forecasting.selection import select_forecaster
 
 __all__ = [
     "ALL_FORECASTERS",
+    "ARIMAForecaster",
     "BaseForecaster",
     "ETSForecaster",
     "ForecastDiagnostics",

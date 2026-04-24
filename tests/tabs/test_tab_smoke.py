@@ -61,30 +61,37 @@ class TestRenderLayout:
 
 
 class TestRegisterCallbacks:
-    def test_eda_registers_3_callbacks(self) -> None:
+    """
+    Chat was centralised into ``tabs/_chat_drawer.py`` (see I3). The
+    per-tab chat callbacks are gone — these tests now confirm the
+    tabs register only their data callbacks, and the drawer module
+    owns chat wiring via ``utils.llm_utils.generate_insight``.
+    """
+
+    def test_eda_registers_2_callbacks(self) -> None:
         app = FakeApp()
         eda_tab.register_callbacks(app)
-        assert len(app.registered) == 3
+        names = {r[0] for r in app.registered}
+        # update_metadata + update_eda. Chat lives in the drawer.
+        assert names == {"update_metadata", "update_eda"}
 
-    def test_lfp_registers_2_callbacks(self) -> None:
+    def test_lfp_registers_forecast_callback_only(self) -> None:
         app = FakeApp()
         lfp_tab.register_callbacks(app)
-        # update_lfp + update_lfp_chat
-        assert len(app.registered) == 2
         names = {r[0] for r in app.registered}
-        assert names == {"update_lfp", "update_lfp_chat"}
+        assert names == {"update_lfp"}
 
-    def test_super_registers_2_callbacks(self) -> None:
+    def test_super_registers_forecast_callback_only(self) -> None:
         app = FakeApp()
         super_tab.register_callbacks(app)
         names = {r[0] for r in app.registered}
-        assert names == {"update_super", "update_super_chat"}
+        assert names == {"update_super"}
 
-    def test_about_registers_chat_callback(self) -> None:
+    def test_about_registers_no_callbacks(self) -> None:
         app = FakeApp()
         about_tab.register_callbacks(app)
-        names = {r[0] for r in app.registered}
-        assert "update_about_chat" in names
+        # About is pure content now; no callbacks.
+        assert app.registered == []
 
 
 # --------------------------------------------------------------------------

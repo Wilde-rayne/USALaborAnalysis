@@ -21,7 +21,7 @@ from utils.forecasting.diagnostics import (  # noqa: E402
     ljungbox_pvalue,
     run_diagnostics,
 )
-from utils.forecasting.models import ETSForecaster  # noqa: E402
+from utils.forecasting.models import ARIMAForecaster, ETSForecaster  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -58,6 +58,55 @@ class TestETS:
         f = ETSForecaster(seasonal_periods=12).fit(y, None)
         assert f.aic is not None and np.isfinite(f.aic)
         assert f.bic is not None and np.isfinite(f.bic)
+
+
+# --------------------------------------------------------------------------
+# ARIMA
+# --------------------------------------------------------------------------
+class TestARIMA:
+    def test_fits_and_picks_an_order_from_the_grid(self) -> None:
+        rng = np.random.default_rng(42)
+        t = np.arange(80, dtype=float)
+        # ARMA-ish series: mean-reverting with noise.
+        y = np.cumsum(rng.normal(0, 0.5, 80)) + 50
+        f = ARIMAForecaster().fit(y, None)
+        assert f._order_chosen in ARIMAForecaster.DEFAULT_GRID
+        assert f.aic is not None and np.isfinite(f.aic)
+
+    def test_predict_has_correct_horizon(self) -> None:
+        rng = np.random.default_rng(7)
+        y = np.cumsum(rng.normal(0, 1, 60)) + 100
+        f = ARIMAForecaster().fit(y, None)
+        preds = f.predict(12)
+        assert preds.shape == (12,)
+        assert np.isfinite(preds).all()
+
+    def test_interval_uses_analytical_bounds(self) -> None:
+        """ARIMA overrides the base residual-bootstrap with get_forecast."""
+        rng = np.random.default_rng(3)
+        y = np.cumsum(rng.normal(0, 1, 80)) + 100
+        f = ARIMAForecaster().fit(y, None)
+        result = f.predict_interval(horizon=12, alpha=0.05)
+        assert result is not None
+        preds, lower, upper = result
+        assert preds.shape == lower.shape == upper.shape == (12,)
+        # Point must be inside the band.
+        assert np.all(lower <= preds + 1e-6)
+        assert np.all(upper >= preds - 1e-6)
+        # CI must widen with horizon (unit-root variance growth).
+        widths = upper - lower
+        assert widths[-1] > widths[0]
+
+    def test_rejects_too_short_series(self) -> None:
+        with pytest.raises(ValueError, match="need >= 20 obs"):
+            ARIMAForecaster().fit(np.arange(10, dtype=float), None)
+
+    def test_raises_when_no_order_in_grid(self) -> None:
+        """Empty grid — nothing to try, fit must raise."""
+        rng = np.random.default_rng(9)
+        y = np.cumsum(rng.normal(0, 1, 40))
+        with pytest.raises(RuntimeError, match="no order"):
+            ARIMAForecaster(search_grid=()).fit(y, None)
 
 
 # --------------------------------------------------------------------------
