@@ -1,6 +1,7 @@
 # app.py
 import logging
 import os
+import secrets
 import threading
 from datetime import datetime
 
@@ -220,23 +221,30 @@ app = dash.Dash(
 )
 server = app.server
 
+# Stable Flask SECRET_KEY so signed session cookies survive restarts
+# and a multi-worker deployment shares one signing key. Production
+# must set FLASK_SECRET_KEY (see .env.example); dev falls back to a
+# per-process random key so no default secret ever lands in git.
+server.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+server.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    # Opt-in once TLS termination is in front; flipping it on under
+    # plain-HTTP local docker-compose breaks dev sessions.
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower()
+    in {"1", "true", "yes"},
+)
 
-# Real health endpoint for the docker-compose healthcheck.
-# Previously the compose file hit /health and relied on `|| exit 1` to
-# mask the 404 from a missing route, which meant an unhealthy process
-# could still look healthy. Returning a 200 with preload status lets
-# external monitors (load balancers, CI smoke) actually sample liveness.
+
+# Health endpoint for the compose healthcheck and external probes.
+# Body is intentionally minimal — exposing version strings, model
+# names, or preload timestamps would let an unauthenticated probe
+# fingerprint the deployment (OWASP API A05:2023).
 @server.route("/health")
 def _health():  # noqa: D401 — Flask handler
-    """Return preload status and a 200/503 based on readiness."""
-    from utils import preload_state as _ps  # noqa: PLC0415
-
-    ready = _ps.preload_completed_at is not None
-    body = {
-        "status": "healthy" if ready else "starting",
-        "preload_completed_at": _ps.preload_completed_at,
-    }
-    return body, (200 if ready else 503)
+    """Return ``{"status": ...}`` with HTTP 200 if ready, 503 if warming up."""
+    ready = preload_state.preload_completed_at is not None
+    return {"status": "healthy" if ready else "starting"}, (200 if ready else 503)
 
 from tabs._components import status_pill  # noqa: E402
 

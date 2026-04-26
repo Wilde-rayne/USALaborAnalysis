@@ -34,8 +34,20 @@ if TYPE_CHECKING:
 # --------------------------------------------------------------------------
 # Internal helpers
 # --------------------------------------------------------------------------
+#: Per-call ceilings on agent inputs (OWASP API A04:2023). 51 covers
+#: 50 states + DC; 30 years comfortably exceeds the longest panel any
+#: current dashboard view consumes.
+MAX_STATES_PER_CALL = 51
+MAX_YEAR_SPAN = 30
+
+
 def _normalize_states(codes: list[str]) -> list[str]:
     """Upper-case + validate every state code against the ontology."""
+    if len(codes) > MAX_STATES_PER_CALL:
+        raise ValueError(
+            f"too many states in one call: got {len(codes)}, "
+            f"max is {MAX_STATES_PER_CALL}"
+        )
     out: list[str] = []
     for code in codes:
         c = str(code).strip().upper()
@@ -54,6 +66,11 @@ def _validate_year_range(start_year: int, end_year: int) -> None:
         raise ValueError("BLS state-level series start around 1948; start_year too early")
     if end_year < start_year:
         raise ValueError("end_year must be >= start_year")
+    if (end_year - start_year) + 1 > MAX_YEAR_SPAN:
+        raise ValueError(
+            f"year span too wide: {start_year}-{end_year} covers "
+            f"{(end_year - start_year) + 1} years, max is {MAX_YEAR_SPAN}"
+        )
 
 
 # --------------------------------------------------------------------------

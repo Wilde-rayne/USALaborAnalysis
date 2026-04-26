@@ -66,6 +66,17 @@ services:
       BEA_API_KEY: "${BEA_API_KEY:-}"
       # Optional — only needed if the FRED fetch agent runs.
       FRED_API_KEY: "${FRED_API_KEY:-}"
+      # Flask session-cookie signing key. Optional in dev (a per-process
+      # random key is generated on startup) but MUST be set to a stable
+      # 32+ byte hex string in production so signed cookies survive
+      # restarts and so multi-worker / multi-replica deployments share
+      # the same signing secret. Generate with:
+      #   python -c "import secrets; print(secrets.token_hex(32))"
+      FLASK_SECRET_KEY: "${FLASK_SECRET_KEY:-}"
+      # Flip to "1" once the deployment sits behind TLS termination so
+      # the session cookie gets the Secure flag. Leave unset on the
+      # plain-HTTP local docker-compose target.
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-}"
     depends_on:
       ollama:
         condition: service_healthy

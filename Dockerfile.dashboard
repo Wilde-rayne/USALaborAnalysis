@@ -1,16 +1,19 @@
 # Dockerfile.dashboard
 FROM python:3.11-slim
 
-# Make Spark’s hard-coded /usr/bin/python3 path exist
+# Make Spark's hard-coded /usr/bin/python3 path exist
 RUN ln -s /usr/local/bin/python3 /usr/bin/python3
 
-# Environment variables
+# Environment variables. Caches live under /app so a non-root runtime
+# user (added below) can read them; previously they were scoped to
+# /root/.cache which becomes inaccessible after dropping privileges.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TF_ENABLE_ONEDNN_OPTS=0 \
     TF_CPP_MIN_LOG_LEVEL=2 \
-    TRANSFORMERS_CACHE=/root/.cache \
-    SENTENCE_TRANSFORMERS_HOME=/root/.cache \
+    TRANSFORMERS_CACHE=/app/.cache \
+    SENTENCE_TRANSFORMERS_HOME=/app/.cache \
+    HF_HOME=/app/.cache \
     PYSPARK_PYTHON=/usr/local/bin/python3 \
     PYSPARK_DRIVER_PYTHON=/usr/local/bin/python3
 
@@ -24,18 +27,39 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends openjdk-21-jre-headless git curl procps && \
     rm -rf /var/lib/apt/lists/*
 
+# Create the unprivileged runtime user up front so subsequent COPYs
+# can ``--chown`` directly to it, sidestepping the antipattern where
+# a final ``chown -R`` doubles the application layer (the 12 GB
+# /app tree gets materialised twice in image storage).
+RUN groupadd --system app && \
+    useradd  --system --gid app --uid 1000 --create-home --home-dir /home/app app
+
 # Python deps
-COPY requirements.txt .
+COPY --chown=app:app requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# (Optional) Pre-download local embeddings model for speed
+# Pre-download the embeddings model. mkdir + chown are folded into the
+# heredoc so the warmed cache lands directly in /app/.cache owned by
+# the runtime user — no extra layer, no second chown traversal.
 RUN python - <<'PY'
+import os, pathlib, shutil
+cache = pathlib.Path("/app/.cache")
+cache.mkdir(parents=True, exist_ok=True)
 from sentence_transformers import SentenceTransformer
 SentenceTransformer("intfloat/e5-small-v2")
+shutil.chown(cache, user="app", group="app")
+for p in cache.rglob("*"):
+    shutil.chown(p, user="app", group="app")
 PY
 
-# Copy app source
-COPY . .
+# Copy app source already owned by ``app`` — no follow-up chown.
+COPY --chown=app:app . .
+
+# Drop root. Running the Python process as UID 1000 means a
+# compromised gunicorn worker can no longer write to /etc, install
+# apt packages, or pivot to the host (ISO/IEC 27034 A.7.3 — least
+# privilege).
+USER app
 
 # Expose Dash port
 EXPOSE 8050

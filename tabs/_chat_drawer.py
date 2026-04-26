@@ -23,7 +23,7 @@ import logging
 from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
-from utils.llm_utils import generate_insight
+from utils.llm_utils import AI_FAILURE_MESSAGE, generate_insight
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,16 @@ TAB_LABELS: dict[str, str] = {
     "super": "Supersector Forecast",
     "about": "About",
 }
+
+#: Hard cap on a single chat message — both client-side (textarea
+#: ``maxLength``) and server-side (callback validation). 5 000 chars
+#: comfortably exceeds any legitimate question and stops a CSV paste
+#: from queueing a multi-minute Ollama call (OWASP API A04:2023).
+MAX_CHAT_MESSAGE_CHARS = 5_000
+
+#: How much of an over-length message to echo back so the user can
+#: see what got rejected without filling the chat history.
+_TRUNCATE_PREVIEW_CHARS = 200
 
 
 def render_drawer() -> html.Div:
@@ -94,6 +104,7 @@ def render_drawer() -> html.Div:
                             dcc.Textarea(
                                 id="chat-drawer-input",
                                 placeholder="What would you like to know?",
+                                maxLength=MAX_CHAT_MESSAGE_CHARS,
                             ),
                             html.Button(
                                 "Send",
@@ -184,12 +195,34 @@ def register_callbacks(app) -> None:
     def submit_chat(n_clicks, query, active_tab, history):
         if not n_clicks or not query or not query.strip():
             raise PreventUpdate
+        cleaned = query.strip()
         history = list(history or [])
-        history.append({"role": "user", "text": query.strip()})
+        # Refuse before reaching the LLM rather than truncating silently
+        # — the client-side ``maxLength`` is advisory; this is the gate.
+        if len(cleaned) > MAX_CHAT_MESSAGE_CHARS:
+            history.append(
+                {"role": "user", "text": cleaned[:_TRUNCATE_PREVIEW_CHARS] + "…"}
+            )
+            history.append({
+                "role": "assistant",
+                "text": (
+                    f"Your message is {len(cleaned):,} characters long; the "
+                    f"limit is {MAX_CHAT_MESSAGE_CHARS:,}. Please shorten it."
+                ),
+            })
+            return history, _render_history(history), ""
+        history.append({"role": "user", "text": cleaned})
         try:
-            answer = generate_insight(query.strip(), active_tab=active_tab)
-        except Exception as exc:  # noqa: BLE001 — surfaced to user
-            logger.warning(f"[chat-drawer] generate_insight failed: {exc}")
-            answer = f"_Error:_ {exc}"
+            answer = generate_insight(cleaned, active_tab=active_tab)
+        except Exception as exc:  # noqa: BLE001 — full trace stays server-side
+            logger.warning(
+                "[chat-drawer] generate_insight failed: %s: %s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
+            # Wrap the shared failure message in Markdown italics so the
+            # bubble visually distinguishes a fallback from a real reply.
+            answer = f"_{AI_FAILURE_MESSAGE}_"
         history.append({"role": "assistant", "text": answer})
         return history, _render_history(history), ""

@@ -17,6 +17,15 @@ from utils.constants import DEFAULT_TIMEOUT  # noqa: F401 — kept for import co
 
 logger = logging.getLogger(__name__)
 
+#: Generic user-facing message returned when the blurb agent fails.
+#: Re-exported so the chat drawer renders the same wording (wrapping
+#: with Markdown italics on its side). Avoids leaking exception text
+#: to the rendered surface (OWASP API A05:2023).
+AI_FAILURE_MESSAGE = (
+    "Sorry, I couldn't generate a response right now. "
+    "The error has been logged — please try again."
+)
+
 
 def _resolve_context(active_tab: str | None, prompt: str) -> str:
     """Pull RAG context for the prompt, falling back silently on failure."""
@@ -38,15 +47,23 @@ def _cached_invoke(key: tuple[str, str, str]) -> str:
 
     Tuple-keyed so identical prompts that retrieved different context
     (e.g. the same question after the panel refreshed) are cached
-    separately.
+    separately. Note that failure responses also get cached — a
+    transient Ollama outage will stick to the LRU entry until evicted
+    or the process restarts; an explicit reload bypasses by varying
+    the prompt or context.
     """
     prompt, context, _model = key
     blurb: BlurbAgent = default_blurb_agent()
     try:
         return blurb.context_answer(prompt, context=context) or "[AI] empty response"
-    except Exception as exc:  # noqa: BLE001 — surfaced back to the UI
-        logger.warning(f"[llm] generate_insight failed: {exc}")
-        return f"[AI] Error generating insight: {exc}"
+    except Exception as exc:  # noqa: BLE001 — full trace stays server-side
+        logger.warning(
+            "[llm] generate_insight failed: %s: %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        return f"[AI] {AI_FAILURE_MESSAGE}"
 
 
 def generate_insight(prompt: str, timeout: int | None = None, active_tab: str | None = None) -> str:

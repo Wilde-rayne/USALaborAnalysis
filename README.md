@@ -202,7 +202,7 @@ Enable exploration of historical employment/unemployment metrics and forecast fu
 **Data & Models**  
 - **Data**: CES = industry counts; LAUS = unemployment & LFPR  
 - **Forecast**: LSTM RNN with 12-month windows  
-- **AI Insights**: Local LLM (`llama2:chat`) based narratives  
+- **AI Insights**: Local LLMs via Ollama — `llama3.2:3b` for chat, `phi3` for the DeepAgents harness  
 
 **Project & Team**  
 Prairie Insights — regional labor market analyses  
