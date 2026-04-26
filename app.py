@@ -83,26 +83,40 @@ def _load_panel_df():
 
 def _preload_lfp_models(df) -> None:
     """
-    Run the LFP bakeoff over the 5 horizons × 2 series (IA + Midwest).
+    Pre-train the LFP bakeoff for the default focus state across the
+    five horizons. Cache key matches the I7 rewrite —
+    ``(metric, state_code, years_ahead)`` — so the first user click
+    after a ``PRELOAD_SCOPE=lfp`` boot hits a warm cache.
 
-    Populates ``tabs.lfp_tab.lfp_model_cache`` with ``ForecastResult``
-    objects keyed by horizon so the first click after startup hits a
-    fully-fit winner instead of running the backtest inline.
+    The 'Midwest_LFPR' aggregate that this function used to compute is
+    no longer a thing on the LFP tab — that tab now does focus-state +
+    peer-states matching, with peers chosen by the user. Pre-training
+    every (metric × state × horizon) combination is too expensive
+    (~50 states × 2 metrics × 5 horizons × ~10 s/bakeoff = ~80 min);
+    the lazy on-click path covers that case fine. Here we only warm
+    the headline series so the demo's first click is instant.
     """
-    from tabs.lfp_tab import IA_COL, MIDWEST_COL, lfp_model_cache
+    from tabs.lfp_tab import _column_for, lfp_model_cache
+    from utils.constants import ALL_STATES
     from utils.forecasting import select_forecaster
 
-    lfp_cols = [c for c in df.columns if c.endswith("_Labor_Force_Participation_Rate")]
-    df[MIDWEST_COL] = df[lfp_cols].mean(axis=1, skipna=True)
-    base = df[["date", IA_COL, MIDWEST_COL]].dropna()
-
-    for years in range(1, 6):
-        entry: dict = {}
-        for col in (IA_COL, MIDWEST_COL):
-            y = base[col].astype(float).to_numpy()
-            dates = base["date"].to_numpy()
-            entry[col] = select_forecaster(y, dates=dates, horizon=years * 12, n_folds=3)
-        lfp_model_cache[years] = entry
+    headline_state = "IA" if "IA" in ALL_STATES else ALL_STATES[0]
+    for metric in ("LFPR", "Unemployment_Rate"):
+        col = _column_for(metric, headline_state)
+        if col not in df.columns:
+            continue
+        series = df[["date", col]].dropna()
+        if len(series) < 24:
+            continue
+        y = series[col].astype(float).to_numpy()
+        dates = series["date"].to_numpy()
+        for years in range(1, 6):
+            try:
+                lfp_model_cache[(metric, headline_state, years)] = select_forecaster(
+                    y, dates=dates, horizon=years * 12, n_folds=3
+                )
+            except RuntimeError:
+                continue
 
 
 def _preload_supersector_models(df) -> None:
