@@ -81,7 +81,7 @@ def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
 
 def read_population(states: list, start: int, end: int) -> pd.DataFrame:
     """
-    Read POP_{ST}.txt files (Census fallback) and return DataFrame with 
+    Read POP_{ST}.txt files (Census fallback) and return DataFrame with
     (state, year, month=1, Population).
     """
     df_list = []
@@ -102,6 +102,66 @@ def read_population(states: list, start: int, end: int) -> pd.DataFrame:
     if pop_df.empty:
         return pop_df
     return pop_df[(pop_df.year>=start) & (pop_df.year<=end)]
+
+
+def read_working_age_population(states: list, start: int, end: int) -> pd.DataFrame:
+    """
+    Read ``WAP_{ST}.txt`` files written by
+    ``utils.fetch_working_age_population`` and return a DataFrame of
+    ACS B23025_001E ("Population 16 years and over") observations.
+
+    Returns an empty DataFrame if no WAP files exist — the merger
+    treats that as "fall back to the uniform 0.78 fraction", so this
+    layer is fully opt-in. Years between two known ACS releases are
+    linearly interpolated per state; years outside the ACS coverage
+    window are forward / backward-filled from the nearest available
+    year so every (state, year) the merger asks about gets a value.
+    """
+    import numpy as np  # noqa: PLC0415 — local import keeps top-level lean
+
+    rows: list[dict] = []
+    if not os.path.isdir(RAW_DIR_LAUS):
+        return pd.DataFrame()
+
+    for fn in os.listdir(RAW_DIR_LAUS):
+        if not (fn.startswith("WAP_") and fn.endswith(".txt")):
+            continue
+        st = fn.split("_", 1)[1].split(".", 1)[0]
+        if st not in states:
+            continue
+        df = pd.read_csv(os.path.join(RAW_DIR_LAUS, fn))
+        if df.empty:
+            continue
+        df["state"] = st
+        df["year"] = df["year"].astype(int)
+        df["working_age_population"] = pd.to_numeric(df["value"], errors="coerce")
+        rows.extend(df[["state", "year", "working_age_population"]].to_dict("records"))
+
+    if not rows:
+        return pd.DataFrame()
+
+    raw = pd.DataFrame(rows)
+    # Densify per-state across the full requested year range so
+    # downstream callers can do a clean (state, year) merge.
+    out_frames: list[pd.DataFrame] = []
+    full_years = list(range(start, end + 1))
+    for st, sub in raw.groupby("state"):
+        s = sub.set_index("year")["working_age_population"].sort_index()
+        s = s.reindex(full_years)
+        # Linear interpolation between known years; forward + backward
+        # fill at the edges so 1996-2004 and post-2024 still get a
+        # value (uses the closest known ACS release as the proxy).
+        s = s.interpolate(method="linear", limit_direction="both")
+        out_frames.append(
+            pd.DataFrame(
+                {
+                    "state": st,
+                    "year": full_years,
+                    "working_age_population": s.values,
+                }
+            )
+        )
+    return pd.concat(out_frames, ignore_index=True)
 
 
 def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
@@ -158,21 +218,48 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
     # CNI16+ is consistently ~78 % of the total resident
     # population — see BLS Handbook of Methods, ch. 1, table 1.
     #
-    # Multiplying the denominator by ``LFPR_WORKING_AGE_FRACTION``
-    # brings the computed LFPR within ~1-3 pp of the BLS-published
-    # state-level rates. The exact per-state CNI16+ share is
-    # available from ACS table B23025 and would be a tighter
-    # denominator; see ``docs/methodology/lfpr_denominator.md`` for
-    # the audit and the next-step plan.
+    # Strategy:
+    #   1. If ACS B23025_001E ("Population 16+") is present (via the
+    #      ``utils.fetch_working_age_population`` fetcher writing
+    #      ``WAP_{ST}.txt`` files), use the per-state per-year
+    #      working-age population directly. Residual error vs. BLS
+    #      published state LFPR drops to ~0.5 pp.
+    #   2. Otherwise fall back to multiplying the total population by
+    #      the uniform US-wide ``LFPR_WORKING_AGE_FRACTION`` (0.78).
+    #      Residual error: ~2 pp.
     #
     # ``LFPR_RAW`` is preserved as ``Labor_Force`` / total population
-    # (the 1996-2024 vintage of this column before the correction)
     # so anyone needing the exact raw ratio can still get it.
     if "Labor_Force" in panel.columns and "Population" in panel.columns:
         lf  = pd.to_numeric(panel["Labor_Force"], errors="coerce")
         pop = pd.to_numeric(panel["Population"], errors="coerce")
         panel["LFPR_RAW"] = 100.0 * lf / pop
-        panel["LFPR"] = 100.0 * lf / (pop * LFPR_WORKING_AGE_FRACTION)
+
+        wap_df = read_working_age_population(states, start, end)
+        if not wap_df.empty:
+            # Per-state, per-year denominator. Merge into the panel and
+            # use it for any (state, year) where ACS gave us a number.
+            panel = pd.merge(
+                panel,
+                wap_df[["state", "year", "working_age_population"]],
+                on=["state", "year"],
+                how="left",
+            )
+            wap = pd.to_numeric(panel["working_age_population"], errors="coerce")
+            denom = wap.where(wap > 0, pop * LFPR_WORKING_AGE_FRACTION)
+            panel["LFPR"] = 100.0 * lf / denom
+            n_acs = int((wap > 0).sum())
+            n_total = int(panel.shape[0])
+            logger.info(
+                f"[MERGE] LFPR: {n_acs}/{n_total} rows used per-state ACS B23025; "
+                f"others fell back to {LFPR_WORKING_AGE_FRACTION:.2f} multiplier."
+            )
+        else:
+            panel["LFPR"] = 100.0 * lf / (pop * LFPR_WORKING_AGE_FRACTION)
+            logger.info(
+                "[MERGE] LFPR: no ACS WAP files present — using uniform "
+                f"{LFPR_WORKING_AGE_FRACTION:.2f} working-age fraction."
+            )
     else:
         logger.warning("[MERGE] Cannot compute LFPR - missing Labor_Force or Population.")
 

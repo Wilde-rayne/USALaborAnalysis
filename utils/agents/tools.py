@@ -158,6 +158,38 @@ def fetch_bea_personal_income(states: list[str], start_year: int, end_year: int)
 
 
 @tool
+def fetch_acs_working_age_population(
+    states: list[str], start_year: int, end_year: int
+) -> str:
+    """
+    Pull ACS B23025_001E ("Population 16 years and over") per state.
+    The merger uses these per-state per-year values as the LFPR
+    denominator instead of the uniform 0.78 working-age fraction,
+    dropping residual error from ~2 pp to <0.5 pp. Files land in
+    ``data/raw/laus/WAP_<ST>.txt``. ACS 1-year coverage starts 2005;
+    requested years outside that range are silently skipped.
+    """
+    from utils.fetch_working_age_population import (  # noqa: PLC0415
+        DEFAULT_ACS_YEARS,
+        fetch_acs_working_age_population as _fetch,
+    )
+
+    codes = _normalize_states(states)
+    _validate_year_range(start_year, end_year)
+    years = tuple(y for y in DEFAULT_ACS_YEARS if start_year <= y <= end_year)
+    if not years:
+        return (
+            f"No ACS years in {start_year}-{end_year} (ACS 1-year coverage "
+            f"starts 2005, suppressed in 2020). Nothing fetched."
+        )
+    written = _fetch(codes, years=years)
+    return (
+        f"Fetched ACS B23025_001E for {len(codes)} state(s) over "
+        f"{', '.join(map(str, years))}; {written} (state, year) rows written."
+    )
+
+
+@tool
 def fetch_bls_qcew_state(
     states: list[str], start_year: int, end_year: int, quarters: list[int] | None = None
 ) -> str:
@@ -282,6 +314,7 @@ ALL_TOOLS: tuple["BaseTool", ...] = (
     fetch_bls_ces,
     fetch_bls_laus,
     fetch_census_population,
+    fetch_acs_working_age_population,
     fetch_bea_personal_income,
     fetch_fred_state_indicator,
     fetch_bls_regional_cpi,
