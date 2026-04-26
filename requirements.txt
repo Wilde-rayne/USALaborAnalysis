@@ -20,10 +20,13 @@ sentence-transformers>=2.6.1,<3.0.0
 torch>=2.0.0,<3.0.0
 
 # LLM agent harness — langchain + Ollama binding.
-# Pinned to 0.3.x major because 0.2→0.3 changed a lot of public API.
-langchain>=0.3,<0.4
-langchain-core>=0.3,<0.4
-langchain-ollama>=0.2,<0.4
+# Pinned to 1.x because deepagents (below) requires langchain>=1.0.0
+# from its first published release. Public API we depend on
+# (``ChatOllama``, ``ChatPromptTemplate``, ``@tool``, ``BaseTool``)
+# is stable across the 0.3→1.0 boundary.
+langchain>=1.0,<2.0
+langchain-core>=1.0,<2.0
+langchain-ollama>=1.0,<2.0
 
 # LangChain DeepAgents — "agent" layer for phi3. Wraps LangGraph with
 # planning (write_todos), virtual filesystem, subagent spawning, and
