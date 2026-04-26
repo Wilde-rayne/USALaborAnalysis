@@ -465,6 +465,13 @@ def render_layout():
                 className="pi-selector-grid",
             ),
             dcc.Loading(id="loading-lfp", children=html.Div(id="lfp-output")),
+            # Cross-callback channel: the main callback drops a prompt
+            # payload here, the deferred callback below picks it up,
+            # routes it through generate_insight, and fills the inline
+            # ``lfp-blurb-area`` placeholder. Splitting it that way lets
+            # the chart appear in ~30 s on a cold click instead of
+            # waiting for the ~30-60 s Ollama round-trip.
+            dcc.Store(id="lfp-blurb-prompt", data=None),
         ]
     )
 
@@ -472,6 +479,7 @@ def render_layout():
 def register_callbacks(app):
     @app.callback(
         Output("lfp-output", "children"),
+        Output("lfp-blurb-prompt", "data"),
         Input("lfp-run", "n_clicks"),
         State("lfp-focus-state", "value"),
         State("lfp-peer-states", "value"),
@@ -479,12 +487,15 @@ def register_callbacks(app):
         State("lfp-years-slider", "value"),
         State("lfp-threshold", "value"),
     )
-    @error_boundary(fallback_id="lfp-output")
+    @error_boundary(fallback_id="lfp-output", extra_outputs=1)
     def update_lfp(n_clicks, focus_state, peer_states, metric, years_ahead, threshold):
         if not n_clicks:
             raise PreventUpdate
         if not focus_state:
-            return html.Div("Pick a focus state first.", className="alert alert-warning")
+            return (
+                html.Div("Pick a focus state first.", className="alert alert-warning"),
+                None,
+            )
 
         df = _load_lfp_panel()
         peer_states = [s for s in (peer_states or []) if s and s != focus_state]
@@ -501,9 +512,12 @@ def register_callbacks(app):
 
         focus_result = state_forecasts.get(focus_state)
         if focus_result is None:
-            return html.Div(
-                f"No {metric_label} series available for {focus_state}.",
-                className="alert alert-warning",
+            return (
+                html.Div(
+                    f"No {metric_label} series available for {focus_state}.",
+                    className="alert alert-warning",
+                ),
+                None,
             )
 
         # Build historic + forecast traces.
@@ -653,6 +667,9 @@ def register_callbacks(app):
         # Prompt the blurb agent with the final-horizon values so the
         # narrative stays grounded in numbers that actually appear on the
         # chart.
+        # Build the blurb prompt now (cheap), but defer the LLM call to
+        # the second callback below so the chart appears as soon as the
+        # bakeoff finishes rather than waiting on Ollama.
         final_values = {
             st: float(state_forecasts[st].model.predict(months)[-1])
             for st in all_states
@@ -669,7 +686,6 @@ def register_callbacks(app):
             )
             + "\nGive a 3-4 sentence analysis aimed at a state workforce planner."
         )
-        insight = generate_insight(prompt, active_tab="lfp")
 
         # The LFPR caveat only matters when LFPR is the chosen metric;
         # the unemployment-rate computation has no equivalent denominator
@@ -684,6 +700,12 @@ def register_callbacks(app):
             else None
         )
 
+        # Inline placeholder where the deferred blurb callback will land.
+        blurb_placeholder = html.Div(
+            html.Em("Generating narrative analysis…", className="pi-muted small"),
+            id="lfp-blurb-area",
+        )
+
         body = [dcc.Graph(figure=fig)]
         if caveat is not None:
             body.append(caveat)
@@ -694,12 +716,34 @@ def register_callbacks(app):
                 trend_panel,
                 rationale_panel,
                 html.Hr(),
-                dcc.Markdown(insight),
-                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
+                blurb_placeholder,
                 html.Hr(),
                 methodology_panel(),
             ]
         )
-        return html.Div(body)
+        return html.Div(body), {"prompt": prompt, "n": int(n_clicks)}
+
+    @app.callback(
+        Output("lfp-blurb-area", "children"),
+        Input("lfp-blurb-prompt", "data"),
+        prevent_initial_call=True,
+    )
+    @error_boundary(fallback_id="lfp-blurb-area")
+    def update_lfp_blurb(payload):
+        """
+        Deferred narrative pass — fires once the main callback has dropped
+        a prompt into the store. Splitting this out lets the chart paint
+        in ~30 s on a cold click instead of waiting for Ollama (~60 s
+        round-trip on llama3.2:3b CPU).
+        """
+        if not payload or not payload.get("prompt"):
+            raise PreventUpdate
+        insight = generate_insight(payload["prompt"], active_tab="lfp")
+        return html.Div(
+            [
+                dcc.Markdown(insight),
+                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
+            ]
+        )
 
     # Chat lives in the global chat drawer now — registered in app.py.

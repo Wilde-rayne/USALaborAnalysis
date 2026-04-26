@@ -341,6 +341,11 @@ def render_layout():
                 className="pi-selector-grid",
             ),
             dcc.Loading(id="loading-super", children=html.Div(id="super-output")),
+            # Same progressive-render pattern as the LFP tab: the main
+            # callback drops a prompt here, the deferred blurb callback
+            # picks it up and fills ``super-blurb-area`` so the chart +
+            # tables paint without waiting on Ollama.
+            dcc.Store(id="super-blurb-prompt", data=None),
         ]
     )
 
@@ -376,6 +381,7 @@ def _sort_states(
 def register_callbacks(app):
     @app.callback(
         Output("super-output", "children"),
+        Output("super-blurb-prompt", "data"),
         Input("supersector-run", "n_clicks"),
         State("supersector-dropdown", "value"),
         State("supersector-region", "value"),
@@ -383,7 +389,7 @@ def register_callbacks(app):
         State("supersector-years-slider", "value"),
         State("supersector-threshold", "value"),
     )
-    @error_boundary(fallback_id="super-output")
+    @error_boundary(fallback_id="super-output", extra_outputs=1)
     def update_super(n_clicks, sector, region, sort_mode, years_ahead, threshold):
         if not n_clicks:
             raise PreventUpdate
@@ -392,10 +398,13 @@ def register_callbacks(app):
         entry = _get_or_train_supersector(sector, years_ahead, df)
         entry = _apply_region_filter(entry, region)
         if not entry:
-            return html.Div(
-                f"No {sector.replace('_', ' ')} data available for the "
-                f"selected region.",
-                className="alert alert-warning",
+            return (
+                html.Div(
+                    f"No {sector.replace('_', ' ')} data available for the "
+                    f"selected region.",
+                    className="alert alert-warning",
+                ),
+                None,
             )
 
         # Per-state summary: forecast value at end of horizon, growth
@@ -517,21 +526,46 @@ def register_callbacks(app):
             + f". Per-state model selection: {winner_summary}. "
             "Provide a concise 3-sentence analysis for regional planners."
         )
-        insight = generate_insight(prompt)
 
+        # Inline placeholder for the deferred-blurb callback below.
+        blurb_placeholder = html.Div(
+            html.Em("Generating regional planner narrative…", className="pi-muted small"),
+            id="super-blurb-area",
+        )
+
+        return (
+            html.Div(
+                [
+                    dcc.Graph(figure=fig),
+                    html.Hr(),
+                    _recommendation_panel(
+                        all_forecasts, sector=sector, years_ahead=years_ahead
+                    ),
+                    _selection_summary(entry),
+                    html.Hr(),
+                    blurb_placeholder,
+                    html.Hr(),
+                    methodology_panel(),
+                ]
+            ),
+            {"prompt": prompt, "n": int(n_clicks)},
+        )
+
+    @app.callback(
+        Output("super-blurb-area", "children"),
+        Input("super-blurb-prompt", "data"),
+        prevent_initial_call=True,
+    )
+    @error_boundary(fallback_id="super-blurb-area")
+    def update_super_blurb(payload):
+        """Deferred narrative pass — same shape as the LFP equivalent."""
+        if not payload or not payload.get("prompt"):
+            raise PreventUpdate
+        insight = generate_insight(payload["prompt"], active_tab="super")
         return html.Div(
             [
-                dcc.Graph(figure=fig),
-                html.Hr(),
-                _recommendation_panel(
-                    all_forecasts, sector=sector, years_ahead=years_ahead
-                ),
-                _selection_summary(entry),
-                html.Hr(),
                 dcc.Markdown(insight),
                 dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
-                html.Hr(),
-                methodology_panel(),
             ]
         )
 

@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------
 def error_boundary(
     fallback_id: str | None = None,
+    *,
+    extra_outputs: int = 0,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator for Dash callback functions: catches uncaught exceptions
@@ -35,6 +37,11 @@ def error_boundary(
     ``fallback_id`` is baked into the rendered markup as a
     ``data-error-of`` attribute so clientside code / tests can locate
     the failed boundary.
+
+    Multi-output callbacks set ``extra_outputs`` to the number of
+    *additional* outputs beyond the primary alert. The boundary
+    returns ``(alert, None, None, …)`` so Dash's tuple-shape check
+    still passes after a failure.
     """
 
     def _wrap(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -49,10 +56,13 @@ def error_boundary(
                     f"[error-boundary] {func.__name__} raised: {exc}\n"
                     f"{traceback.format_exc()}"
                 )
-                return error_alert(
+                alert = error_alert(
                     message=f"{type(exc).__name__}: {exc}",
                     fallback_id=fallback_id,
                 )
+                if extra_outputs <= 0:
+                    return alert
+                return (alert, *(None for _ in range(extra_outputs)))
 
         return inner
 
