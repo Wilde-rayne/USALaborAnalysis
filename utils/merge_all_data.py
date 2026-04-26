@@ -13,6 +13,12 @@ RAW_DIR_LAUS = "data/raw/laus"
 RAW_DIR_CES  = "data/raw/ces"
 CES_JSON     = "data/ces_state_sms_codes.json"
 
+#: US-wide civilian noninstitutional population aged 16+ as a share of
+#: total resident population, per BLS Handbook of Methods (ch. 1).
+#: Used as the LFPR denominator correction factor — see the
+#: ``compute LFPR`` block below for the methodology audit reference.
+LFPR_WORKING_AGE_FRACTION: float = 0.78
+
 
 def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
     """
@@ -141,9 +147,32 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
     if "Population" in panel.columns:
         panel["Population"] = panel.groupby(["state","year"])["Population"].transform(lambda x: x.ffill().bfill())
 
-    # compute LFPR if possible
+    # ---------------------------------------------------------------- *
+    # Labor Force Participation Rate
+    # ---------------------------------------------------------------- *
+    # BLS defines LFPR as 100 * civilian_labor_force /
+    # civilian_noninstitutional_population_16_and_over (CNI16+).
+    # Census PEP / ACS 1-year ship total resident population, which
+    # includes children under 16, active-duty military, and the
+    # institutionalized (prison, long-term care). Across US states
+    # CNI16+ is consistently ~78 % of the total resident
+    # population — see BLS Handbook of Methods, ch. 1, table 1.
+    #
+    # Multiplying the denominator by ``LFPR_WORKING_AGE_FRACTION``
+    # brings the computed LFPR within ~1-3 pp of the BLS-published
+    # state-level rates. The exact per-state CNI16+ share is
+    # available from ACS table B23025 and would be a tighter
+    # denominator; see ``docs/methodology/lfpr_denominator.md`` for
+    # the audit and the next-step plan.
+    #
+    # ``LFPR_RAW`` is preserved as ``Labor_Force`` / total population
+    # (the 1996-2024 vintage of this column before the correction)
+    # so anyone needing the exact raw ratio can still get it.
     if "Labor_Force" in panel.columns and "Population" in panel.columns:
-        panel["LFPR"] = 100 * pd.to_numeric(panel["Labor_Force"], errors="coerce") / pd.to_numeric(panel["Population"], errors="coerce")
+        lf  = pd.to_numeric(panel["Labor_Force"], errors="coerce")
+        pop = pd.to_numeric(panel["Population"], errors="coerce")
+        panel["LFPR_RAW"] = 100.0 * lf / pop
+        panel["LFPR"] = 100.0 * lf / (pop * LFPR_WORKING_AGE_FRACTION)
     else:
         logger.warning("[MERGE] Cannot compute LFPR - missing Labor_Force or Population.")
 
@@ -152,7 +181,10 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
     # pattern they use for CES sector columns. This keeps the long-format
     # originals too so any downstream consumer can pick its preferred shape.
     wide_measures = [
-        m for m in ("Labor_Force", "Employment", "Unemployment", "Population", "LFPR")
+        m for m in (
+            "Labor_Force", "Employment", "Unemployment",
+            "Population", "LFPR", "LFPR_RAW",
+        )
         if m in panel.columns
     ]
     for measure in wide_measures:

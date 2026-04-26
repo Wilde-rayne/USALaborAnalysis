@@ -96,14 +96,28 @@ class TestMergeAllData:
         assert set(panel["state"].unique()) == {"IA"}
         assert set(panel["month"].unique()) == set(range(1, 13))
 
-    def test_lfpr_arithmetic_matches_definition(self, fixture_data_dirs: Path) -> None:
-        """LFPR = 100 * labor_force / population. Verify against the fixture."""
+    def test_lfpr_arithmetic_uses_working_age_correction(
+        self, fixture_data_dirs: Path
+    ) -> None:
+        """
+        Per the LFPR-denominator audit (docs/methodology/), the corrected
+        LFPR divides by ``Population * 0.78`` (US CNI16+ share). The raw
+        ratio survives as the ``LFPR_RAW`` column for transparency.
+        """
         panel = merge_mod.merge_all_data(["IA"], 2020, 2020)
         jan = panel[(panel["year"] == 2020) & (panel["month"] == 1)].iloc[0]
-        # 1,500,000 / 3,150,000 * 100 ≈ 47.619%.
-        expected = 100.0 * 1_500_000 / 3_150_000
         assert pd.notna(jan["LFPR"])
-        assert abs(jan["LFPR"] - expected) < 1e-6
+        assert pd.notna(jan["LFPR_RAW"])
+
+        raw_expected = 100.0 * 1_500_000 / 3_150_000
+        corrected_expected = raw_expected / merge_mod.LFPR_WORKING_AGE_FRACTION
+
+        assert jan["LFPR_RAW"] == pytest.approx(raw_expected, abs=1e-6)
+        assert jan["LFPR"] == pytest.approx(corrected_expected, abs=1e-6)
+        # Sanity: the correction lifts LFPR by exactly 1/0.78 ≈ 1.282×.
+        assert jan["LFPR"] / jan["LFPR_RAW"] == pytest.approx(
+            1.0 / merge_mod.LFPR_WORKING_AGE_FRACTION, rel=1e-9
+        )
 
     def test_ces_manufacturing_column_is_created(self, fixture_data_dirs: Path) -> None:
         panel = merge_mod.merge_all_data(["IA"], 2020, 2020)
@@ -138,12 +152,24 @@ class TestWidenedMeasures:
         assert "IA_Population" in panel.columns
 
     def test_wide_lfpr_uses_participation_rate_naming(self, fixture_data_dirs: Path) -> None:
-        """Tabs look for ``{state}_Labor_Force_Participation_Rate`` explicitly."""
+        """
+        Tabs look for ``{state}_Labor_Force_Participation_Rate`` explicitly.
+        After the working-age correction, the wide column carries the
+        BLS-aligned value (raw / 0.78), and the raw ratio is exposed via
+        ``{state}_LFPR_RAW``.
+        """
         panel = merge_mod.merge_all_data(["IA"], 2020, 2020)
         assert "IA_Labor_Force_Participation_Rate" in panel.columns
+        assert "IA_LFPR_RAW" in panel.columns
         jan = panel[(panel["year"] == 2020) & (panel["month"] == 1)].iloc[0]
-        expected = 100.0 * 1_500_000 / 3_150_000
-        assert abs(jan["IA_Labor_Force_Participation_Rate"] - expected) < 1e-6
+
+        raw_expected = 100.0 * 1_500_000 / 3_150_000
+        corrected_expected = raw_expected / merge_mod.LFPR_WORKING_AGE_FRACTION
+
+        assert jan["IA_LFPR_RAW"] == pytest.approx(raw_expected, abs=1e-6)
+        assert jan["IA_Labor_Force_Participation_Rate"] == pytest.approx(
+            corrected_expected, abs=1e-6
+        )
 
     def test_long_format_preserved(self, fixture_data_dirs: Path) -> None:
         """The per-row long-format columns coexist with the wide ones."""

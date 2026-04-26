@@ -39,7 +39,7 @@ from utils.forecasting.trend import (
 )
 from utils.llm_utils import generate_insight
 from utils.ontology import ONTOLOGY
-from tabs._methodology import methodology_panel
+from tabs._methodology import LFPR_DENOMINATOR_NOTE, methodology_panel
 from tabs._components import error_boundary
 
 logger = logging.getLogger(__name__)
@@ -671,9 +671,24 @@ def register_callbacks(app):
         )
         insight = generate_insight(prompt, active_tab="lfp")
 
-        return html.Div(
+        # The LFPR caveat only matters when LFPR is the chosen metric;
+        # the unemployment-rate computation has no equivalent denominator
+        # gotcha (BLS defines U-rate as Unemployment / Labor_Force, which
+        # is exactly what we compute).
+        caveat = (
+            dcc.Markdown(
+                LFPR_DENOMINATOR_NOTE,
+                className="alert alert-warning small pi-method-caveat",
+            )
+            if metric == "LFPR"
+            else None
+        )
+
+        body = [dcc.Graph(figure=fig)]
+        if caveat is not None:
+            body.append(caveat)
+        body.extend(
             [
-                dcc.Graph(figure=fig),
                 html.Hr(),
                 match_panel,
                 trend_panel,
@@ -685,5 +700,6 @@ def register_callbacks(app):
                 methodology_panel(),
             ]
         )
+        return html.Div(body)
 
     # Chat lives in the global chat drawer now — registered in app.py.

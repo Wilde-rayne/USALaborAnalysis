@@ -101,6 +101,30 @@ DATA_SOURCE_KEYS: tuple[str, ...] = (
 
 
 # ---------------------------------------------------------------------------
+# Definitional caveats — surfaces as its own block on the LFP tab
+# ---------------------------------------------------------------------------
+#: Plain-text body of the LFPR-denominator audit, mirrored in
+#: ``docs/methodology/lfpr_denominator.md``. Rendered as a yellow
+#: callout above the chart on the LFP tab so a researcher hits the
+#: caveat before they screenshot the number.
+LFPR_DENOMINATOR_NOTE: str = (
+    "**LFPR denominator caveat.** BLS defines LFPR as "
+    "`100 × civilian_labor_force / civilian_noninstitutional_"
+    "population_16+`. The Census Population Estimates Program ships "
+    "*total* resident population, which includes children under 16, "
+    "active-duty military, and the institutionalized — all three are "
+    "excluded from the BLS denominator. We apply a **0.78** "
+    "working-age civilian-noninstitutional correction (US average per "
+    "BLS Handbook of Methods, ch. 1) so the displayed LFPR lands "
+    "within ~2 pp of the published BLS state LFPR. The uncorrected "
+    "ratio is preserved as `{state}_LFPR_RAW` in the panel. See "
+    "[`docs/methodology/lfpr_denominator.md`]"
+    "(https://github.com/) for the full audit + the per-state "
+    "ACS-B23025-based fix that's queued for the next data refresh."
+)
+
+
+# ---------------------------------------------------------------------------
 # Rendering helpers
 # ---------------------------------------------------------------------------
 def _inline_cites_suffix(cites: Iterable[str]) -> str:
