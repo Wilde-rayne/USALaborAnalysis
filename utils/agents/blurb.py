@@ -137,6 +137,63 @@ class BlurbAgent:
             prompt = question
         return self.agent.invoke(prompt)
 
+    # ------------------------------------------------------------------
+    # View-grounded explanations
+    # ------------------------------------------------------------------
+    def explain_view(self, view_state: dict, *, mode: str = "panel") -> str:
+        """
+        Ground a narrative in the actual rendered panel.
+
+        The dashboard tabs construct a small ``view_state`` dict per
+        figure / table (typed by ``_kind``: ``forecast_panel``,
+        ``requirements_panel``, ``trend_panel``, ``recap``). We feed
+        that through :class:`SentenceRAGBuilder.render_view_sentences`
+        so the LLM never sees raw key/value numbers — only ontology-
+        aware natural-language sentences tagged with state, region,
+        and measure. That's the same surface we use for the embedding
+        corpus (``utils.agents.sentence_rag``), keeping retrieval and
+        generation grounded on the same prose.
+
+        ``mode='panel'`` produces a tight 2-3 sentence explanation
+        tied to one figure; ``mode='recap'`` produces a 4-6 sentence
+        end-of-tab synthesis. The "do not invent values" guardrail is
+        the main hedge against hallucination — the model can only
+        weave the sentences we put in front of it.
+        """
+        if mode not in {"panel", "recap"}:
+            raise ValueError(f"explain_view mode must be 'panel' or 'recap', got {mode!r}")
+        # Lazy import to keep the BlurbAgent module cheap to load — the
+        # sentence-RAG module pulls in the full ontology + measures map.
+        from utils.agents.sentence_rag import default_rag_builder  # noqa: PLC0415
+
+        sentences = default_rag_builder().render_view_sentences(view_state)
+        if not sentences:
+            return (
+                "I don't have enough panel context to explain this view. "
+                "Try re-running the forecast or refreshing the page."
+            )
+        title = view_state.get("title") or view_state.get("metric") or "this panel"
+        if mode == "recap":
+            instructions = (
+                "Write a 4-6 sentence end-of-tab synthesis aimed at a "
+                "state workforce planner. Lead with the headline finding, "
+                "then weave the supporting facts into one paragraph — "
+                "do not bullet-list them."
+            )
+        else:
+            instructions = (
+                "Write a 2-3 sentence plain-English explanation of this "
+                "panel. Stay grounded in the facts below — every claim "
+                "must trace back to one of the sentences."
+            )
+        body = "\n".join(f"- {s}" for s in sentences)
+        prompt = (
+            f"{instructions}\n"
+            f"Do NOT invent values, ranks, or trends not stated below.\n\n"
+            f"Panel: {title}\nFacts:\n{body}"
+        )
+        return self.agent.invoke(prompt)
+
 
 # --------------------------------------------------------------------------
 # Module-level convenience

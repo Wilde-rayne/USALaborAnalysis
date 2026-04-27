@@ -292,6 +292,225 @@ class SentenceRAGBuilder:
         )
         return self.agent_polish(sentences) if polish else sentences
 
+    # ------------------------------------------------------------------
+    # View-state rendering
+    # ------------------------------------------------------------------
+    def render_view_sentences(self, view_state: dict) -> list[str]:
+        """
+        Render an on-screen panel's ``view_state`` into ontology-aware
+        natural-language sentences.
+
+        This is the grounding layer for ``BlurbAgent.explain_view`` —
+        the AI never sees the raw key/value dict; it sees prose tagged
+        with state, region, measure, and source so its narrative stays
+        on-rails. Sentences from this function are also a natural input
+        to the embedding store: tag them with ``view_state['_kind']``
+        and ``focus_state`` to retrieve later from the chat drawer.
+
+        Dispatches on ``view_state['_kind']``; an unknown kind falls
+        back to a flat ``key: value`` rendering so a forgotten kind
+        still produces *something* (the AI just gets a dumber prompt).
+        """
+        kind = view_state.get("_kind", "generic")
+        renderer = {
+            "forecast_panel": self._render_forecast_panel,
+            "requirements_panel": self._render_requirements_panel,
+            "trend_panel": self._render_trend_panel,
+            "recap": self._render_recap,
+        }.get(kind, self._render_generic)
+        return [s for s in renderer(view_state) if s]
+
+    # --- per-kind renderers ---
+    def _render_forecast_panel(self, vs: dict) -> list[str]:
+        focus = self._state_label(vs.get("focus_state"))
+        measure = self._measure_label(vs.get("metric_key"))
+        horizon = vs.get("horizon_years")
+        last_year = vs.get("last_actual_year")
+        last_val = vs.get("last_actual_value")
+        forecast = vs.get("forecast_point")
+        ci = vs.get("forecast_ci") or [None, None]
+        ci_lo, ci_hi = (ci[0], ci[1]) if isinstance(ci, (list, tuple)) and len(ci) >= 2 else (None, None)
+        model = vs.get("winning_model")
+        rmse = vs.get("rmse")
+        peers = vs.get("peer_states") or []
+
+        sentences: list[str] = []
+        if focus and measure and horizon:
+            model_clause = (
+                f" using the {model.upper()} model selected from a Naive / "
+                f"Seasonal-Naive / Holt-Winters / ARIMA bake-off"
+                f" (out-of-sample RMSE {rmse:.2f})"
+                if model and rmse is not None
+                else ""
+            )
+            sentences.append(
+                f"The {focus} {measure} forecast over the next {horizon} year(s)"
+                f"{model_clause}."
+            )
+        if focus and measure and last_year is not None and last_val is not None:
+            sentences.append(
+                f"The last published {focus} {measure} was "
+                f"{self._fmt_pct_or_num(last_val, vs)} in {last_year}."
+            )
+        if forecast is not None and horizon and measure:
+            ci_clause = (
+                f", with a 95% confidence interval of "
+                f"{self._fmt_pct_or_num(ci_lo, vs)}–{self._fmt_pct_or_num(ci_hi, vs)}"
+                if ci_lo is not None and ci_hi is not None
+                else ""
+            )
+            sentences.append(
+                f"The +{horizon}-year point forecast is "
+                f"{self._fmt_pct_or_num(forecast, vs)}{ci_clause}."
+            )
+        peer_labels = [self._state_label(c) for c in peers if c]
+        if peer_labels:
+            region_hint = self._shared_region_hint(
+                [vs.get("focus_state"), *peers]
+            )
+            sentences.append(
+                f"Peer states under comparison: {', '.join(peer_labels)}"
+                + (f" ({region_hint})." if region_hint else ".")
+            )
+        return sentences
+
+    def _render_requirements_panel(self, vs: dict) -> list[str]:
+        measure = self._measure_label(vs.get("metric_key"))
+        threshold = vs.get("threshold")
+        direction = vs.get("direction", "min")
+        op = "≥" if direction == "min" else "≤"
+        passing = vs.get("states_passing") or []
+        failing = vs.get("states_failing") or []
+        all_points = vs.get("state_points") or []
+
+        sentences: list[str] = []
+        # When the user leaves the threshold blank we still want the
+        # AI panel to read the forecast values across the comparison —
+        # the table on screen shows them, the AI should describe them.
+        if threshold is None:
+            if measure:
+                sentences.append(
+                    f"No requirement threshold was set, so no pass/fail "
+                    f"verdict was computed for {measure}."
+                )
+            if all_points:
+                parts = self._fmt_state_value_pairs(all_points, vs)
+                if parts:
+                    sentences.append(
+                        f"Projected {measure or 'forecast'} across the "
+                        f"{len(parts)} state(s) under comparison: "
+                        f"{', '.join(parts)}."
+                    )
+            return sentences
+
+        # Threshold-set path: describe the rule + the bucketed verdicts.
+        if measure:
+            sentences.append(
+                f"The threshold for {measure} is set at {op} "
+                f"{self._fmt_pct_or_num(threshold, vs)}."
+            )
+        if passing:
+            parts = self._fmt_state_value_pairs(passing, vs)
+            if parts:
+                sentences.append(
+                    f"{len(parts)} state(s) projected to meet the requirement: "
+                    f"{', '.join(parts)}."
+                )
+        if failing:
+            parts = self._fmt_state_value_pairs(failing, vs)
+            if parts:
+                sentences.append(
+                    f"{len(parts)} state(s) projected to fall short: "
+                    f"{', '.join(parts)}."
+                )
+        return sentences
+
+    def _fmt_state_value_pairs(self, items: list, vs: dict) -> list[str]:
+        """Helper — turn ``[{code, value}, ...]`` into ``["Iowa (65.2%)", ...]``."""
+        return [
+            f"{self._state_label(item.get('code'))} ({self._fmt_pct_or_num(item.get('value'), vs)})"
+            for item in items
+            if item.get("code") and item.get("value") is not None
+        ]
+
+    def _render_trend_panel(self, vs: dict) -> list[str]:
+        measure = self._measure_label(vs.get("metric_key"))
+        rows = vs.get("states") or []
+        sentences: list[str] = []
+        if measure and rows:
+            sentences.append(
+                f"Historic {measure} trend summary across {len(rows)} state(s)."
+            )
+        for row in rows:
+            label = self._state_label(row.get("code"))
+            current = row.get("current")
+            change = row.get("five_yr_change")
+            if not label or current is None:
+                continue
+            change_clause = ""
+            if change is not None:
+                direction = "up" if change > 0 else "down" if change < 0 else "flat"
+                change_clause = (
+                    f", {direction} {abs(change):.1f} pp over five years"
+                    if direction != "flat"
+                    else ", essentially flat over five years"
+                )
+            sentences.append(
+                f"{label} {measure} is currently "
+                f"{self._fmt_pct_or_num(current, vs)}{change_clause}."
+            )
+        return sentences
+
+    def _render_recap(self, vs: dict) -> list[str]:
+        # The recap re-uses the per-panel renderers so the synthesis
+        # gets every sentence the user just saw on the page. The recap
+        # adds a one-line headline at the top so the LLM has a clear
+        # "lead" anchor to expand on.
+        sentences: list[str] = []
+        title = vs.get("title")
+        if title:
+            sentences.append(f"Recap: {title}.")
+        for panel in vs.get("panels", []):
+            sentences.extend(self.render_view_sentences(panel))
+        return sentences
+
+    def _render_generic(self, vs: dict) -> list[str]:
+        return [f"{k}: {v}" for k, v in vs.items() if not k.startswith("_") and k != "title"]
+
+    # --- formatting helpers ---
+    def _state_label(self, code: str | None) -> str:
+        if not code:
+            return ""
+        st = self.ontology.states.get(str(code).upper())
+        return st.name if st else str(code)
+
+    def _measure_label(self, key: str | None) -> str:
+        if not key:
+            return ""
+        m = self._measures.get(str(key))
+        return m.name if m else str(key).replace("_", " ").lower()
+
+    def _fmt_pct_or_num(self, value, vs: dict) -> str:
+        if value is None:
+            return "n/a"
+        measure = self._measures.get(vs.get("metric_key", ""))
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if measure and measure.unit == "percent":
+            return f"{v:.1f}%"
+        return f"{v:,.2f}"
+
+    def _shared_region_hint(self, codes: list[str | None]) -> str:
+        """If every state in the list shares one Census region, name it."""
+        regions = {
+            self.ontology.states[c.upper()].region
+            for c in codes
+            if c and c.upper() in self.ontology.states
+        }
+        return f"{regions.pop()} census region" if len(regions) == 1 else ""
+
 
 # --------------------------------------------------------------------------
 # Helpers
@@ -308,3 +527,21 @@ def _ordinal(n: int) -> str:
 def _is_lower_better(measure: Measure) -> bool:
     """Unemployment is bad; everything else on _RAG_MEASURES is higher-better."""
     return measure.key in {"Unemployment", "Unemployment_Rate"}
+
+
+# --------------------------------------------------------------------------
+# Module-level convenience
+# --------------------------------------------------------------------------
+_default_builder: SentenceRAGBuilder | None = None
+
+
+def default_rag_builder() -> SentenceRAGBuilder:
+    """
+    Lazy singleton — the per-call view-state renderers are stateless
+    apart from the ontology pointer, so re-instantiating per blurb
+    just rebuilds the measure dict for nothing.
+    """
+    global _default_builder
+    if _default_builder is None:
+        _default_builder = SentenceRAGBuilder()
+    return _default_builder

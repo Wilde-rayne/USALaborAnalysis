@@ -37,10 +37,16 @@ from utils.forecasting.trend import (
     rolling_statistics,
     summarize_trend,
 )
-from utils.llm_utils import generate_insight
+from utils.llm_utils import explain_view
 from utils.ontology import ONTOLOGY
 from tabs._methodology import LFPR_DENOMINATOR_NOTE, methodology_panel
-from tabs._components import error_boundary
+from tabs._components import (
+    PANEL_BLURB_TYPE,
+    error_boundary,
+    figure_panel,
+    render_blurb,
+    tab_recap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,9 +263,44 @@ def _model_rationale_table(col_label: str, result: ForecastResult) -> html.Div:
     )
 
 
-def _requirements_match_table(
+def _compute_forecast_points(
     states_in_scope: list[str],
     state_forecasts: dict[str, ForecastResult],
+    months: int,
+) -> dict[str, dict | None]:
+    """
+    Resolve point estimate + 95% CI for every state once, so both the
+    rendered match table and the AI's pass/fail classifier can read
+    from the same dict instead of each calling ``predict_interval``
+    independently. ``None`` for a state means the bake-off had no
+    usable result for it (UI renders an em-dash row).
+    """
+    out: dict[str, dict | None] = {}
+    for st in states_in_scope:
+        result = state_forecasts.get(st)
+        if result is None:
+            out[st] = None
+            continue
+        interval = result.model.predict_interval(months, alpha=0.05)
+        if interval is not None:
+            preds, lower, upper = interval
+            ci_lo, ci_hi = float(lower[-1]), float(upper[-1])
+        else:
+            preds = result.model.predict(months)
+            ci_lo = ci_hi = float(preds[-1])
+        out[st] = {
+            "point":      float(preds[-1]),
+            "ci_lo":      ci_lo,
+            "ci_hi":      ci_hi,
+            "model_name": result.name,
+            "rmse":       float(result.metrics.rmse),
+        }
+    return out
+
+
+def _requirements_match_table(
+    states_in_scope: list[str],
+    forecast_points: dict[str, dict | None],
     months: int,
     metric: str,
     threshold: float | None,
@@ -269,8 +310,8 @@ def _requirements_match_table(
     unit = "%"
     rows = []
     for st in states_in_scope:
-        result = state_forecasts.get(st)
-        if result is None:
+        info = forecast_points.get(st)
+        if info is None:
             rows.append(
                 html.Tr(
                     [
@@ -280,16 +321,7 @@ def _requirements_match_table(
                 )
             )
             continue
-        interval = result.model.predict_interval(months, alpha=0.05)
-        if interval is not None:
-            preds, lower, upper = interval
-            point = float(preds[-1])
-            ci_lo = float(lower[-1])
-            ci_hi = float(upper[-1])
-        else:
-            preds = result.model.predict(months)
-            point = float(preds[-1])
-            ci_lo = ci_hi = point
+        point, ci_lo, ci_hi = info["point"], info["ci_lo"], info["ci_hi"]
         passes: bool | None
         if threshold is None:
             passes = None
@@ -312,7 +344,7 @@ def _requirements_match_table(
                     html.Td(st),
                     html.Td(f"{point:.2f}{unit}"),
                     html.Td(f"[{ci_lo:.2f}, {ci_hi:.2f}]{unit}"),
-                    html.Td(f"{result.name} (RMSE {result.metrics.rmse:.2f})"),
+                    html.Td(f"{info['model_name']} (RMSE {info['rmse']:.2f})"),
                     verdict_cell,
                 ]
             )
@@ -465,21 +497,82 @@ def render_layout():
                 className="pi-selector-grid",
             ),
             dcc.Loading(id="loading-lfp", children=html.Div(id="lfp-output")),
-            # Cross-callback channel: the main callback drops a prompt
-            # payload here, the deferred callback below picks it up,
-            # routes it through generate_insight, and fills the inline
-            # ``lfp-blurb-area`` placeholder. Splitting it that way lets
-            # the chart appear in ~30 s on a cold click instead of
-            # waiting for the ~30-60 s Ollama round-trip.
-            dcc.Store(id="lfp-blurb-prompt", data=None),
+            # Cross-callback channel: the main callback drops a dict of
+            # view_state payloads keyed by section ("forecast",
+            # "requirements", "trend", "recap"). A single multiplexed
+            # MATCH-pattern callback fans out one Ollama call per
+            # section, so the chart paints first and each AI panel
+            # populates as soon as its specific call returns. Section
+            # IDs use ``{"type": PANEL_BLURB_TYPE, "tab": "lfp",
+            # "section": ...}`` so multiple tabs can share the same
+            # filler without colliding.
+            dcc.Store(id="lfp-blurb-payload", data=None),
         ]
     )
+
+
+def _blurb_id(section: str) -> dict:
+    """Compose the pattern-matching ID for a per-tab AI blurb placeholder."""
+    return {"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": section}
+
+
+def _round2(value: float | None) -> float | None:
+    """Round to two decimals; pass ``None`` through so view_states stay JSON-clean."""
+    return None if value is None else round(float(value), 2)
+
+
+def _classify_requirements(
+    states_in_scope: list[str],
+    forecast_points: dict[str, dict | None],
+    direction: str,
+    threshold: float | None,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Split states into ``passing`` / ``failing`` lists for the
+    requirements view_state, reading from the same ``forecast_points``
+    dict the rendered match table uses so the AI verdict can never
+    disagree with what the user sees. ``([], [])`` when no threshold
+    is set.
+    """
+    if threshold is None:
+        return [], []
+    passing: list[dict] = []
+    failing: list[dict] = []
+    for st in states_in_scope:
+        info = forecast_points.get(st)
+        if info is None:
+            continue
+        point = info["point"]
+        passes = (
+            (direction == "min" and point >= threshold)
+            or (direction == "max" and point <= threshold)
+        )
+        (passing if passes else failing).append(
+            {"code": st, "value": _round2(point)}
+        )
+    return passing, failing
+
+
+def _trend_view_rows(
+    summaries: dict[str, TrendSummary | None],
+) -> list[dict]:
+    """Compact per-state rows for the trend panel's view_state."""
+    rows: list[dict] = []
+    for code, summary in summaries.items():
+        if summary is None:
+            continue
+        rows.append({
+            "code": code,
+            "current": _round2(summary.current),
+            "five_yr_change": _round2(summary.delta_5y),
+        })
+    return rows
 
 
 def register_callbacks(app):
     @app.callback(
         Output("lfp-output", "children"),
-        Output("lfp-blurb-prompt", "data"),
+        Output("lfp-blurb-payload", "data"),
         Input("lfp-run", "n_clicks"),
         State("lfp-focus-state", "value"),
         State("lfp-peer-states", "value"),
@@ -652,45 +745,92 @@ def register_callbacks(app):
                 summaries[st] = summarize_trend(df[col].dropna().to_numpy())
         trend_panel = _trend_summary_table(summaries, unit="%")
 
-        # Requirements match table.
+        # Resolve every state's point + CI once so the requirements
+        # table and the AI's pass/fail classifier read from the same
+        # numbers — eliminates a second predict_interval pass.
+        forecast_points = _compute_forecast_points(all_states, state_forecasts, months)
+        threshold_value = float(threshold) if threshold not in (None, "") else None
         match_panel = _requirements_match_table(
             states_in_scope=all_states,
-            state_forecasts=state_forecasts,
+            forecast_points=forecast_points,
             months=months,
             metric=metric,
-            threshold=float(threshold) if threshold not in (None, "") else None,
+            threshold=threshold_value,
         )
 
         # Model rationale for the focus state (peers stay summarised).
         rationale_panel = _model_rationale_table(focus_state, focus_result)
 
-        # Prompt the blurb agent with the final-horizon values so the
-        # narrative stays grounded in numbers that actually appear on the
-        # chart.
-        # Build the blurb prompt now (cheap), but defer the LLM call to
-        # the second callback below so the chart appears as soon as the
-        # bakeoff finishes rather than waiting on Ollama.
-        final_values = {
-            st: float(state_forecasts[st].model.predict(months)[-1])
-            for st in all_states
-            if st in state_forecasts
-        }
-        prompt = (
-            f"{metric_label} forecast over {years_ahead} year(s):\n"
-            + "\n".join(f"- {st}: {v:.2f}%" for st, v in final_values.items())
-            + (
-                f"\nRequirement: {'≥' if METRIC_THRESHOLD_DIRECTION[metric] == 'min' else '≤'} "
-                f"{threshold:.2f}%"
-                if threshold not in (None, "")
-                else ""
-            )
-            + "\nGive a 3-4 sentence analysis aimed at a state workforce planner."
+        # ----- Build per-panel view_state payloads -----
+        # Every figure / table on the page gets a typed view_state dict
+        # that SentenceRAGBuilder turns into ontology-aware sentences;
+        # the LLM only ever sees prose, never raw key:value lines.
+        last_date = df["date"].max()
+        last_actual_year = int(last_date.year) if pd.notna(last_date) else None
+        last_actual_value = (
+            float(hist[focus_col].iloc[-1])
+            if not hist.empty and focus_col in hist
+            else None
         )
+        focus_points = forecast_points.get(focus_state) or {}
 
-        # The LFPR caveat only matters when LFPR is the chosen metric;
-        # the unemployment-rate computation has no equivalent denominator
-        # gotcha (BLS defines U-rate as Unemployment / Labor_Force, which
-        # is exactly what we compute).
+        forecast_view = {
+            "_kind": "forecast_panel",
+            "title": f"{focus_state} {metric_label} forecast (+{years_ahead} yrs)",
+            "focus_state": focus_state,
+            "peer_states": list(peer_states),
+            "metric_key": metric,
+            "horizon_years": years_ahead,
+            "last_actual_year": last_actual_year,
+            "last_actual_value": _round2(last_actual_value),
+            "forecast_point": _round2(focus_points.get("point")),
+            "forecast_ci": (
+                [_round2(focus_points["ci_lo"]), _round2(focus_points["ci_hi"])]
+                if "ci_lo" in focus_points
+                else None
+            ),
+            "winning_model": focus_result.name,
+            "rmse": _round2(focus_result.metrics.rmse),
+        }
+
+        passing, failing = _classify_requirements(
+            all_states,
+            forecast_points,
+            METRIC_THRESHOLD_DIRECTION[metric],
+            threshold_value,
+        )
+        # Always emit per-state forecast points so the AI panel has
+        # something to say even when the user left the threshold blank.
+        state_points = [
+            {"code": st, "value": _round2(info["point"])}
+            for st, info in forecast_points.items()
+            if info is not None
+        ]
+        requirements_view = {
+            "_kind": "requirements_panel",
+            "title": f"Requirements match at +{years_ahead}-year horizon",
+            "metric_key": metric,
+            "threshold": threshold_value,
+            "direction": METRIC_THRESHOLD_DIRECTION[metric],
+            "states_passing": passing,
+            "states_failing": failing,
+            "state_points": state_points,
+        }
+
+        trend_view = {
+            "_kind": "trend_panel",
+            "title": f"Historic {metric_label} trend",
+            "metric_key": metric,
+            "states": _trend_view_rows(summaries),
+        }
+
+        recap_view = {
+            "_kind": "recap",
+            "title": f"{focus_state} {metric_label} outlook (+{years_ahead} yrs)",
+            "panels": [forecast_view, requirements_view, trend_view],
+        }
+
+        # ----- LFPR-only caveat banner (denominator audit) -----
         caveat = (
             dcc.Markdown(
                 LFPR_DENOMINATOR_NOTE,
@@ -700,50 +840,97 @@ def register_callbacks(app):
             else None
         )
 
-        # Inline placeholder where the deferred blurb callback will land.
-        blurb_placeholder = html.Div(
-            html.Em("Generating narrative analysis…", className="pi-muted small"),
-            id="lfp-blurb-area",
-        )
-
-        body = [dcc.Graph(figure=fig)]
+        # ----- Interleaved body: figure → AI → figure → AI → recap -----
+        body: list = []
         if caveat is not None:
             body.append(caveat)
-        body.extend(
-            [
-                html.Hr(),
-                match_panel,
-                trend_panel,
-                rationale_panel,
-                html.Hr(),
-                blurb_placeholder,
-                html.Hr(),
-                methodology_panel(),
-            ]
-        )
-        return html.Div(body), {"prompt": prompt, "n": int(n_clicks)}
+        body.extend([
+            figure_panel(
+                title=forecast_view["title"],
+                figure=dcc.Graph(figure=fig),
+                caption=(
+                    f"Solid line: published {metric_label.lower()} for "
+                    f"{focus_state}. Dashed: 12-month rolling mean. "
+                    f"Shaded band: 95% prediction interval from the "
+                    f"winning bake-off model."
+                ),
+                blurb_id=_blurb_id("forecast"),
+            ),
+            figure_panel(
+                title=requirements_view["title"],
+                figure=match_panel,
+                caption=None,
+                blurb_id=_blurb_id("requirements"),
+            ),
+            figure_panel(
+                title=trend_view["title"],
+                figure=trend_panel,
+                caption=(
+                    "Per-state level + 1-year and 5-year change vs the "
+                    "all-time range and population standard deviation."
+                ),
+                blurb_id=_blurb_id("trend"),
+            ),
+            tab_recap(
+                title="Recap & deeper detail",
+                blurb_id=_blurb_id("recap"),
+            ),
+            html.Hr(),
+            rationale_panel,
+            html.Hr(),
+            methodology_panel(),
+        ])
+
+        payload = {
+            "forecast": forecast_view,
+            "requirements": requirements_view,
+            "trend": trend_view,
+            "recap": recap_view,
+            # ``n`` is included so the Store actually changes value
+            # between identical-parameter clicks (Dash's MATCH callback
+            # ignores re-emissions of unchanged data).
+            "n": int(n_clicks),
+        }
+        return html.Div(body), payload
 
     @app.callback(
-        Output("lfp-blurb-area", "children"),
-        Input("lfp-blurb-prompt", "data"),
+        Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "forecast"},     "children"),
+        Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "requirements"}, "children"),
+        Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "trend"},        "children"),
+        Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "recap"},        "children"),
+        Input("lfp-blurb-payload", "data"),
         prevent_initial_call=True,
     )
-    @error_boundary(fallback_id="lfp-blurb-area")
-    def update_lfp_blurb(payload):
+    @error_boundary(fallback_id="lfp-panel-blurb", extra_outputs=3)
+    def fill_lfp_blurbs(payload):
         """
-        Deferred narrative pass — fires once the main callback has dropped
-        a prompt into the store. Splitting this out lets the chart paint
-        in ~30 s on a cold click instead of waiting for Ollama (~60 s
-        round-trip on llama3.2:3b CPU).
+        Sequentially generate all four panel narratives in **one** HTTP
+        request. The earlier MATCH-pattern fan-out fired four parallel
+        long-poll fetches, which Chrome throttles and drops with
+        ``net::ERR_NETWORK_IO_SUSPENDED``; one long single fetch is
+        much more robust to browser-side connection management at the
+        cost of "trickle in" UX. ``explain_view`` is LRU-cached on
+        (view_state JSON, mode, model) so re-runs of the same
+        parameters return instantly.
         """
-        if not payload or not payload.get("prompt"):
+        if not payload:
             raise PreventUpdate
-        insight = generate_insight(payload["prompt"], active_tab="lfp")
-        return html.Div(
-            [
-                dcc.Markdown(insight),
-                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
-            ]
-        )
+        out: list = []
+        for section in ("forecast", "requirements", "trend", "recap"):
+            view_state = payload.get(section)
+            if not view_state:
+                # Empty placeholder kept; reaching this branch means
+                # update_lfp didn't produce a view for this section.
+                out.append(html.Div(
+                    html.Em(
+                        "no panel context — re-run the forecast",
+                        className="pi-muted small",
+                    ),
+                ))
+                continue
+            mode = "recap" if section == "recap" else "panel"
+            text = explain_view(view_state, mode=mode)
+            out.append(render_blurb(text))
+        return tuple(out)
 
     # Chat lives in the global chat drawer now — registered in app.py.

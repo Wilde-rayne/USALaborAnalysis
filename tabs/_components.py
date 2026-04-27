@@ -177,3 +177,92 @@ def loading_skeleton(*, lines: int = 3, width: str = "100%") -> html.Div:
         ],
         style={"width": width, "padding": "0.5rem 0"},
     )
+
+
+# --------------------------------------------------------------------------
+# Interleaved figure → caption → AI explanation pattern
+# --------------------------------------------------------------------------
+#: Pattern-matching ID type used by the deferred AI explanation callback.
+#: Tabs use ``{"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "<id>"}``;
+#: the per-tab callback fires once per matched section and renders the
+#: AI prose into the placeholder.
+PANEL_BLURB_TYPE = "pi-panel-blurb"
+
+
+def figure_panel(
+    *,
+    title: str,
+    figure: Any,
+    caption: str | None,
+    blurb_id: dict,
+    placeholder: str = "Generating narrative analysis…",
+) -> html.Div:
+    """
+    Interleaved tile: figure / table → caption → AI explanation.
+
+    The ``figure`` argument can be any Dash element — a ``dcc.Graph``,
+    a Bootstrap table built elsewhere, or an ``html.Img`` for a
+    seaborn-rendered PNG. ``blurb_id`` is the pattern-matching dict
+    (e.g. ``{"type": PANEL_BLURB_TYPE, "tab": "lfp", "section":
+    "forecast"}``) the deferred AI callback writes to. A ``caption``
+    of ``None`` skips the caption row entirely.
+    """
+    children: list[Any] = [
+        html.H6(title, className="pi-panel-title"),
+        html.Div(figure, className="pi-panel-figure"),
+    ]
+    if caption:
+        children.append(
+            html.Div(caption, className="pi-panel-caption pi-muted small")
+        )
+    children.append(
+        html.Div(
+            html.Em(placeholder, className="pi-muted small"),
+            id=blurb_id,
+            className="pi-panel-blurb",
+        )
+    )
+    return html.Div(children, className="pi-panel-tile")
+
+
+def tab_recap(
+    *,
+    title: str = "Recap & deeper detail",
+    blurb_id: dict,
+    placeholder: str = "Synthesising the recap…",
+) -> html.Div:
+    """
+    End-of-tab synthesis section. Same deferred-fill pattern as
+    :func:`figure_panel`, but visually distinct (heavier title, no
+    figure) so the user reads it as a wrap-up rather than another
+    chart.
+    """
+    return html.Div(
+        [
+            html.H5(title, className="pi-recap-title"),
+            html.Div(
+                html.Em(placeholder, className="pi-muted small"),
+                id=blurb_id,
+                className="pi-recap-blurb",
+            ),
+        ],
+        className="pi-recap-section",
+    )
+
+
+def render_blurb(text: str, *, disclaimer: bool = True) -> html.Div:
+    """
+    Standard wrapper for AI-generated prose: Markdown body + optional
+    italic disclaimer. Centralised so every callback that fills a
+    panel-blurb placeholder uses the same shape.
+    """
+    children: list[Any] = [dcc.Markdown(text, className="pi-blurb-body")]
+    if disclaimer:
+        children.append(
+            dcc.Markdown(
+                "_AI-generated narrative. May contain inaccuracies — "
+                "ground decisions in the cited methodology._",
+                className="pi-blurb-disclaimer pi-muted small",
+            )
+        )
+    return html.Div(children, className="pi-blurb")

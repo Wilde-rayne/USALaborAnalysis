@@ -34,6 +34,8 @@
   --pi-brand:           #2b4f81;   /* Prairie blue */
   --pi-brand-soft:      #dbe6f3;
   --pi-brand-ink:       #1c3a61;
+  --pi-accent:          #2c7be5;   /* mid-blue rule for blurb tiles */
+  --pi-surface-subtle:  #f7f8fa;   /* inset background for AI panels */
 
   --pi-ok:              #1a7b51;
   --pi-warn:            #a56800;
@@ -90,6 +92,8 @@
     --pi-brand:          #6ba0db;
     --pi-brand-soft:     #22354f;
     --pi-brand-ink:      #8eb6e3;
+    --pi-accent:         #6ba0db;
+    --pi-surface-subtle: #142031;
     --pi-ok:             #5fc191;
     --pi-warn:           #e4b65e;
     --pi-danger:         #ef6a6a;
@@ -713,6 +717,70 @@ select:focus, textarea:focus {
 [data-pi-tip]:hover::after, [data-pi-tip]:focus-visible::after {
   opacity: 1;
   transform: translateY(0);
+}
+
+
+/* ------------------------------------------------------------------- *
+ *  Interleaved figure / table → AI-explanation tile
+ * ------------------------------------------------------------------- *
+ * Each tile is a single visual card so the figure and the AI prose
+ * read as a unit (the user's interleave brief: image → AI →
+ * image → AI → recap). The blurb sits inside the same card with
+ * a soft inset background so it visually belongs to the figure
+ * above it rather than floating below.
+ */
+.pi-panel-tile {
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-md);
+  padding: var(--pi-sp-5) var(--pi-sp-6);
+  box-shadow: var(--pi-shadow-sm);
+  margin-bottom: var(--pi-sp-6);
+}
+.pi-panel-tile > :first-child { margin-top: 0; }
+.pi-panel-tile > :last-child  { margin-bottom: 0; }
+
+.pi-panel-title {
+  font-size: var(--pi-fs-md);
+  margin-bottom: var(--pi-sp-3);
+  color: var(--pi-text);
+}
+
+.pi-panel-figure {
+  margin-bottom: var(--pi-sp-3);
+}
+
+.pi-panel-caption {
+  margin-bottom: var(--pi-sp-4);
+  line-height: 1.45;
+}
+
+.pi-panel-blurb,
+.pi-recap-blurb {
+  background: var(--pi-surface-subtle, #f7f8fa);
+  border-left: 3px solid var(--pi-accent, #2c7be5);
+  border-radius: var(--pi-radius-sm);
+  padding: var(--pi-sp-3) var(--pi-sp-4);
+  font-size: var(--pi-fs-sm);
+  line-height: 1.55;
+}
+
+.pi-recap-section {
+  background: var(--pi-surface);
+  border: 1px solid var(--pi-border);
+  border-radius: var(--pi-radius-md);
+  padding: var(--pi-sp-6);
+  box-shadow: var(--pi-shadow-sm);
+  margin: var(--pi-sp-8) 0 var(--pi-sp-6);
+}
+
+.pi-recap-title {
+  margin-bottom: var(--pi-sp-3);
+}
+
+.pi-blurb-disclaimer {
+  margin-top: var(--pi-sp-2);
+  opacity: 0.75;
 }
 
 

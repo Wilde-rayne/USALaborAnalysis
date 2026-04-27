@@ -9,6 +9,7 @@ path shares the same connection, system prompt, and timeout handling.
 """
 from __future__ import annotations
 
+import json
 import logging
 from functools import lru_cache
 
@@ -76,3 +77,45 @@ def generate_insight(prompt: str, timeout: int | None = None, active_tab: str | 
     # triggers fresh generations without restarting the app.
     blurb = default_blurb_agent()
     return _cached_invoke((prompt, context, blurb.agent.model))
+
+
+# --------------------------------------------------------------------------
+# View-grounded explanations (interleaved figure → AI panel pattern)
+# --------------------------------------------------------------------------
+@lru_cache(maxsize=256)
+def _cached_explain(key: tuple[str, str, str]) -> str:
+    """
+    LRU-cached blurb keyed on the JSON-serialized view_state, mode, and
+    chat-model name. Identical reruns of the same forecast return
+    instantly; rerun with new params triggers a fresh generation.
+    Failure strings get cached too (same caveat as ``_cached_invoke``).
+    """
+    view_json, mode, _model = key
+    blurb: BlurbAgent = default_blurb_agent()
+    try:
+        view_state = json.loads(view_json)
+        return blurb.explain_view(view_state, mode=mode) or "[AI] empty response"
+    except Exception as exc:  # noqa: BLE001 — full trace stays server-side
+        logger.warning(
+            "[llm] explain_view failed: %s: %s",
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        return f"[AI] {AI_FAILURE_MESSAGE}"
+
+
+def explain_view(view_state: dict, *, mode: str = "panel") -> str:
+    """
+    Public facade for the interleaved figure→AI pattern. Tabs build a
+    small ``view_state`` dict per panel (last-actual, forecast, CI,
+    rank, threshold) and call this; result is a 2-3 sentence panel
+    explanation or a 4-6 sentence end-of-tab recap.
+
+    JSON-serialised cache key: deterministic for the same view, so the
+    same forecast click after warm-up returns instantly. ``default=str``
+    coerces datetimes / numpy scalars without a typed encoder.
+    """
+    blurb = default_blurb_agent()
+    payload = json.dumps(view_state, sort_keys=True, default=str)
+    return _cached_explain((payload, mode, blurb.agent.model))
