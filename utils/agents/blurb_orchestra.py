@@ -76,7 +76,12 @@ from utils.agents.ollama import (
     CHAT_MODEL_ENV,
     OLLAMA_BASE_URL,
 )
-from utils.agents.reviewer import HolisticReviewer, ReviewerAgent, TileReviewer
+from utils.agents.reviewer import (
+    HolisticReviewer,
+    ReviewerAgent,
+    TileReviewer,
+    strip_preamble,
+)
 from utils.agents.sentence_rag import default_rag_builder
 from utils.constants import DEFAULT_TIMEOUT
 
@@ -145,24 +150,36 @@ _SECTION_PROMPTS: dict[str, str] = {
 }
 
 
+#: Per-specialist call timeout. The orchestrator-side default is
+#: deliberately tighter than the env-driven ``DEFAULT_TIMEOUT`` (which
+#: governs the chat drawer + tools): a panel specialist that doesn't
+#: respond in ~2 minutes on CPU Ollama is almost certainly stuck
+#: behind a queue; failing fast surfaces the issue to the user via
+#: the AI_FAILURE_MESSAGE rather than blocking the polling callback
+#: from making forward progress on the other panels.
+SPECIALIST_TIMEOUT_SECONDS: int = 120
+
+
 def _make_specialist(
     section: str,
     *,
     model: str | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = SPECIALIST_TIMEOUT_SECONDS,
 ) -> LaborAgent:
     """
     Build a short-lived specialist for a single panel section.
 
-    The recap section gets the chat model (better synthesis); panel
-    specialists get the worker model (faster + smaller, since they
-    only need to interpret 3-5 sentences of context).
+    All specialists default to the chat model (``OLLAMA_MODEL``).
+    The earlier two-model split (panels on phi3, recap on
+    llama3.2:3b) tripped the ``llama runner process has terminated``
+    error in single-CPU + 7.5 GB RAM containers — phi3's runner
+    OOM'd when llama3.2:3b was already resident, even with
+    ``OLLAMA_MAX_LOADED_MODELS=2``. One model means one runner, no
+    second-model load to fail; the chat model is also strictly the
+    higher-quality one for narrative work.
     """
     if model is None:
-        if section == "recap":
-            model = os.getenv(CHAT_MODEL_ENV, "llama3.2:3b")
-        else:
-            model = os.getenv(AGENT_MODEL_ENV, "phi3")
+        model = os.getenv(CHAT_MODEL_ENV, "llama3.2:3b")
     return LaborAgent(
         LaborAgentConfig(
             model=model,
@@ -207,7 +224,27 @@ class BlurbOrchestrator:
        to update the page progressively.
     """
 
-    def __init__(self, *, max_workers: int = 4, max_retries: int = 1):
+    def __init__(
+        self,
+        *,
+        max_workers: int = 4,
+        max_retries: int = 0,
+        enable_llm_review: bool = False,
+        enable_holistic_audit: bool = False,
+    ):
+        """
+        ``max_retries`` / ``enable_llm_review`` / ``enable_holistic_audit``
+        default OFF: a first click only pays the cost of N specialist
+        calls + 1 recap, which keeps wall-time reactive on single-CPU
+        Ollama. Pass ``enable_*=True`` for the full nested-harness
+        review pass when latency matters less than rigour (e.g. an
+        offline batch run, or a future "rigorous mode" UI toggle).
+
+        The reviewer's free heuristic quick-check still runs in either
+        mode and is what catches the most common preamble / no-numbers
+        failure modes; only the LLM-backed evaluation + targeted
+        rewrite are gated behind the flag.
+        """
         # ``thread_name_prefix`` makes the threads visible in
         # ``ps -L`` / debuggers as ``blurb-orch-N`` so it's obvious
         # which work is in flight when the dashboard is busy.
@@ -219,6 +256,8 @@ class BlurbOrchestrator:
         self._tile_reviewer = TileReviewer()
         self._holistic = HolisticReviewer()
         self._max_retries = max_retries
+        self._enable_llm_review = enable_llm_review
+        self._enable_holistic_audit = enable_holistic_audit
         self._lock = threading.Lock()
         self._closed = False
 
@@ -296,13 +335,13 @@ class BlurbOrchestrator:
             on_section_done("recap", recap_text)
 
         # ----- Phase 3: holistic audit (cross-section coherence) -----
-        # The per-section reviewer cleared each piece individually;
-        # this auditor sees them together and catches issues only
-        # visible at the tab level (recap that fails to weave, panels
-        # that contradict each other, missing cross-panel insights).
-        # If it flags one section, we issue a targeted rewrite using
-        # the auditor's feedback. Bias toward shipping if the audit
-        # itself errors — never let the auditor block the page.
+        # OFF by default — the auditor is two extra LLM calls per
+        # click (audit + targeted revise) which on single-CPU Ollama
+        # extends wall time past the "reactive" budget. Enable for
+        # offline / batch runs where latency matters less than rigour.
+        if not self._enable_holistic_audit:
+            return panel_results
+
         try:
             section_facts = self._collect_facts(panel_views, recap_view)
             audit = self._holistic.audit(panel_results, section_facts)
@@ -313,9 +352,6 @@ class BlurbOrchestrator:
                     "[orch] holistic audit asks revise of %s: %s",
                     target, feedback[:160],
                 )
-                # Build a hand-rolled revision prompt so the auditor's
-                # feedback drives the rewrite instead of going through
-                # the per-section reviewer's looser revision loop.
                 target_view = (
                     recap_view if target == "recap"
                     else (panel_views.get(target) or {})
@@ -383,40 +419,53 @@ class BlurbOrchestrator:
         specialist = _make_specialist(section)
 
         def _initial_prompt() -> str:
+            # Don't include a "Panel: <title>" header in the prompt —
+            # the model parrots it back as the first line ("Panel: IA
+            # Labor Force Participation Rate outlook…"), which then
+            # has to be stripped post-hoc. The system prompt already
+            # conveys what role the agent plays; the facts block is
+            # all the model needs.
             return (
-                f"Panel: {title}\n"
+                f"Topic: {title}\n\n"
                 f"Facts:\n{facts}\n\n"
-                f"Cite the numbers above; do not invent any."
+                f"Write the analysis directly — no header line, no "
+                f"\"Panel:\" prefix, no \"Headline:\" prefix. Cite "
+                f"the numbers above; do not invent any."
             )
 
         prompt = _initial_prompt()
         candidate = specialist.invoke(prompt)
+        # Strip any leading preamble clause the model emitted ("Based
+        # on the provided facts, …", "Here is a 3-sentence executive
+        # summary:", "Panel: Executive Summary", etc.). Single string
+        # operation — no LLM round-trip — so it's safe in the reactive
+        # default path and consistently improves first-line quality.
+        candidate = strip_preamble(candidate) or candidate
 
+        # Free heuristic check — runs even with LLM review disabled
+        # because it's pure-Python (preamble / digit count / sentinels).
+        ok, reason = self._reviewer.quick_check(candidate)
+        if ok or not self._enable_llm_review:
+            logger.debug(
+                "[orch] section=%s shipped after specialist call "
+                "(quick_check=%s, llm_review_enabled=%s)",
+                section, ok, self._enable_llm_review,
+            )
+            return candidate
+
+        # Optional LLM-review + revision loop (off by default — the
+        # extra round-trips multiply latency on single-CPU Ollama).
         for attempt in range(self._max_retries):
             review = self._reviewer.review(candidate, facts)
             if review["passed"]:
-                # Per-section reviewer cleared the text. Run the tile
-                # reviewer too — currently a fast PASS because the
-                # image-writer track is stubbed (no figure_spec
-                # available to cross-check), but the call site is in
-                # place for when the figure-builder slice lands.
                 tile = self._tile_reviewer.review(
                     section=section,
                     blurb=candidate,
-                    figure_spec=None,  # TODO: wire image_writer output
+                    figure_spec=None,  # image-writer stub
                     facts=facts,
                 )
                 if tile["passed"]:
-                    logger.debug(
-                        "[orch] section=%s passed on attempt %d "
-                        "(text-stage=%s, tile-stage=%s)",
-                        section, attempt + 1,
-                        review.get("stage"), tile.get("stage"),
-                    )
                     return candidate
-                # Tile reviewer flagged a figure↔text mismatch — fall
-                # through to the same revise path the text reviewer
-                # uses, but with the tile feedback as the directive.
                 review = tile
             logger.info(
                 "[orch] section=%s revising (stage=%s): %s",
@@ -430,8 +479,6 @@ class BlurbOrchestrator:
                 f"numbers from the facts."
             )
             candidate = specialist.invoke(prompt)
-
-        # Out of retries — return whatever the latest attempt produced.
         return candidate
 
     def _collect_facts(

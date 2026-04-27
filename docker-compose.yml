@@ -15,10 +15,12 @@ services:
       # reuse on shared system prompts means the wall-clock cost
       # is only ~1.5–2× a single call rather than 4×.
       OLLAMA_NUM_PARALLEL: "4"
-      # MAX_LOADED_MODELS=2 keeps phi3 (panel specialists, reviewers)
-      # and llama3.2:3b (chat + recap synthesis) both resident so we
-      # never pay the model-load latency mid-pipeline.
-      OLLAMA_MAX_LOADED_MODELS: "2"
+      # MAX_LOADED_MODELS=1 — the orchestrator now uses a single
+      # model (``OLLAMA_MODEL``, llama3.2:3b) for every specialist
+      # because phi3's runner crashed under 7.5 GB container RAM
+      # when llama3.2:3b was also resident. One loaded model means
+      # one runner, no second-model load to fail.
+      OLLAMA_MAX_LOADED_MODELS: "1"
       # KEEP_ALIVE: longer than the default 5 m so the model stays
       # warm across the user reading panels + asking follow-ups.
       OLLAMA_KEEP_ALIVE: "30m"

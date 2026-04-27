@@ -44,18 +44,118 @@ REVIEWER_SYSTEM_PROMPT = (
 )
 
 
-#: Common preamble snippets the specialist agents emitted in earlier
-#: sessions. The quick-check trips on any of them so we re-prompt
-#: without burning a reviewer LLM call.
+#: Common preamble snippets the specialist agents emit. Two roles:
+#: (1) the quick-check flags any candidate that *starts* with one
+#: of these so the orchestrator can fall back to a re-prompt; (2)
+#: :func:`strip_preamble` removes the offending opening clause
+#: directly when LLM-review is disabled (the reactive default).
+#:
+#: Match strings are lower-cased + use plain ASCII apostrophes; the
+#: stripper does the case-insensitive comparison.
 _PREAMBLE_MARKERS: tuple[str, ...] = (
     "here's a plain-english",
+    "here is a plain-english",
     "here's an explanation",
+    "here is an explanation",
+    "here's a 3-sentence",
+    "here is a 3-sentence",
+    "here's a possible",
+    "here is a possible",
     "let me explain",
     "the panel shows that",
     "based on the facts",
+    "based on the panel facts",
+    "based on the panel",
+    "based on the provided facts",
+    "based on the provided information",
+    "based on the provided data",
+    "based on the information provided",
     "according to the panel",
+    "according to the facts",
     "in this analysis",
+    "executive summary:",
+    "panel: executive summary",
+    "panel:",
+    "topic:",
+    "headline:",
+    "headline finding:",
 )
+
+
+def strip_preamble(text: str) -> str:
+    """
+    Remove a single leading preamble clause from ``text`` if one
+    matches :data:`_PREAMBLE_MARKERS`. Returns the cleaned text;
+    leaves the input unchanged when no marker matches.
+
+    Strategy: case-insensitive prefix match against the markers; on
+    a hit, drop everything up to and including the first sentence-
+    ending punctuation (``. : !``) or newline, then strip residual
+    whitespace. Conservative — only strips when we're sure it's a
+    preamble (matches the start, not somewhere in the middle).
+    """
+    if not text:
+        return text
+    candidate = text.lstrip()
+    # Loop so we strip nested preambles like "Panel: IA … \n
+    # Headline Finding: …" — each pass removes the outermost layer
+    # until no marker matches.
+    for _pass in range(3):
+        result = _strip_one_preamble(candidate)
+        if result == candidate:
+            return candidate
+        candidate = result
+    return candidate
+
+
+def _strip_one_preamble(text: str) -> str:
+    """Single-pass strip — removes at most one preamble marker."""
+    candidate = text.lstrip()
+    if not candidate:
+        return candidate
+    lower = candidate.lower()
+    for marker in _PREAMBLE_MARKERS:
+        if not lower.startswith(marker):
+            continue
+        # Find the end of the leading clause. Only cut on:
+        #   - newline
+        #   - colon (preamble headers like "Executive Summary:" /
+        #     "Panel: Executive Summary")
+        #   - "," (comma) ending the preamble clause —
+        #     "Based on the provided facts, forward expectations…"
+        #     drops just the leading "Based on the provided facts,"
+        #     and keeps the substantive forecast that follows.
+        # We deliberately do NOT cut on "." because the period
+        # might be inside a number ("66.3%") and a sentence-end
+        # period would lose substantive content; the comma /
+        # colon cut is enough for every preamble marker we've
+        # seen the model emit.
+        cut = -1
+        marker_len = len(marker)
+        for idx, ch in enumerate(candidate):
+            # Examine characters AT or AFTER the marker boundary.
+            # ``idx == marker_len`` is the first char that isn't part
+            # of the marker — the trailing punctuation that ends the
+            # preamble clause ("Based on the provided facts," — the
+            # comma is at exactly ``marker_len``).
+            if idx < marker_len:
+                continue
+            if ch in (":", "\n", ","):
+                cut = idx + 1
+                break
+            if ch in ("!", "?"):
+                cut = idx + 1
+                break
+        if cut < 0:
+            # Whole string was preamble (no terminator found).
+            return ""
+        cleaned = candidate[cut:].lstrip()
+        # If the strip leaves nothing useful, return the original —
+        # better to ship the imperfect text than nothing.
+        if len(cleaned) < 60:
+            return candidate
+        return cleaned
+    return candidate
 
 
 class ReviewerAgent:
