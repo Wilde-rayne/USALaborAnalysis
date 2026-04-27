@@ -336,6 +336,9 @@ class SentenceRAGBuilder:
         horizon = vs.get("horizon_years")
         last_year = vs.get("last_actual_year")
         last_val = vs.get("last_actual_value")
+        forecast_start = vs.get("forecast_start_year")
+        forecast_end = vs.get("forecast_end_year")
+        data_lag = vs.get("data_lag_months") or 0
         forecast = vs.get("forecast_point")
         ci = vs.get("forecast_ci") or [None, None]
         ci_lo, ci_hi = (ci[0], ci[1]) if isinstance(ci, (list, tuple)) and len(ci) >= 2 else (None, None)
@@ -344,7 +347,7 @@ class SentenceRAGBuilder:
         peers = vs.get("peer_states") or []
 
         sentences: list[str] = []
-        if focus and measure and horizon:
+        if focus and measure and horizon and forecast_start:
             model_clause = (
                 f" using the {model.upper()} model selected from a Naive / "
                 f"Seasonal-Naive / Holt-Winters / ARIMA bake-off"
@@ -352,16 +355,28 @@ class SentenceRAGBuilder:
                 if model and rmse is not None
                 else ""
             )
+            window = (
+                f"{forecast_start}–{forecast_end}"
+                if forecast_end and forecast_end != forecast_start
+                else str(forecast_start)
+            )
             sentences.append(
-                f"The {focus} {measure} forecast over the next {horizon} year(s)"
-                f"{model_clause}."
+                f"The {focus} {measure} forecast covers {window} "
+                f"({horizon}-year window){model_clause}."
             )
         if focus and measure and last_year is not None and last_val is not None:
+            lag_clause = (
+                f"; the {data_lag}-month gap between that and the "
+                f"forecast start represents months that have elapsed but "
+                f"BLS hasn't published yet"
+                if data_lag and data_lag > 0
+                else ""
+            )
             sentences.append(
                 f"The last published {focus} {measure} was "
-                f"{self._fmt_pct_or_num(last_val, vs)} in {last_year}."
+                f"{self._fmt_pct_or_num(last_val, vs)} in {last_year}{lag_clause}."
             )
-        if forecast is not None and horizon and measure:
+        if forecast is not None and forecast_end and measure:
             ci_clause = (
                 f", with a 95% confidence interval of "
                 f"{self._fmt_pct_or_num(ci_lo, vs)}–{self._fmt_pct_or_num(ci_hi, vs)}"
@@ -369,7 +384,7 @@ class SentenceRAGBuilder:
                 else ""
             )
             sentences.append(
-                f"The +{horizon}-year point forecast is "
+                f"The end-of-window point forecast (year {forecast_end}) is "
                 f"{self._fmt_pct_or_num(forecast, vs)}{ci_clause}."
             )
         peer_labels = [self._state_label(c) for c in peers if c]

@@ -7,6 +7,21 @@ services:
     image: ollama/ollama:latest
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
+      # The Day-4 BlurbOrchestrator dispatches up to 4 specialist
+      # subagents in parallel (one per panel) plus a reviewer + a
+      # holistic auditor. With NUM_PARALLEL=1 they queue serially
+      # and the first click takes 5+ minutes; bumping to 4 lets
+      # Ollama interleave token generation across streams. KV-cache
+      # reuse on shared system prompts means the wall-clock cost
+      # is only ~1.5–2× a single call rather than 4×.
+      OLLAMA_NUM_PARALLEL: "4"
+      # MAX_LOADED_MODELS=2 keeps phi3 (panel specialists, reviewers)
+      # and llama3.2:3b (chat + recap synthesis) both resident so we
+      # never pay the model-load latency mid-pipeline.
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      # KEEP_ALIVE: longer than the default 5 m so the model stays
+      # warm across the user reading panels + asking follow-ups.
+      OLLAMA_KEEP_ALIVE: "30m"
     ports:
       - "11434:11434"
     volumes:

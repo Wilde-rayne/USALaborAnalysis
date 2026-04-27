@@ -175,21 +175,22 @@ class BlurbAgent:
         title = view_state.get("title") or view_state.get("metric") or "this panel"
         if mode == "recap":
             instructions = (
-                "Write a 4-6 sentence end-of-tab synthesis aimed at a "
-                "state workforce planner. Lead with the headline finding, "
-                "then weave the supporting facts into one paragraph — "
-                "do not bullet-list them."
+                "3 sentences max. Lead with the headline finding for a "
+                "state workforce planner, weave 1 statistical comparison "
+                "(vs peers or historical mean), close with 1 actionable "
+                "implication. No preamble. Plain prose, not bullets."
             )
         else:
             instructions = (
-                "Write a 2-3 sentence plain-English explanation of this "
-                "panel. Stay grounded in the facts below — every claim "
-                "must trace back to one of the sentences."
+                "2 sentences max. First describes what the panel shows "
+                "(cite the specific numbers). Second INTERPRETS — a "
+                "statistical observation OR a workforce-planner "
+                "implication. No preamble."
             )
         body = "\n".join(f"- {s}" for s in sentences)
         prompt = (
             f"{instructions}\n"
-            f"Do NOT invent values, ranks, or trends not stated below.\n\n"
+            f"Cite numbers from the facts; do not invent any.\n\n"
             f"Panel: {title}\nFacts:\n{body}"
         )
         return self.agent.invoke(prompt)

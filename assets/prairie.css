@@ -414,17 +414,23 @@ select:focus, textarea:focus {
  * ------------------------------------------------------------------- */
 .pi-chat-fab {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 1000;
+  bottom: 28px;
+  right: 28px;
+  /* Sits above Plotly's modebar (z-index 999) and the loading
+     spinner overlays (z-index 990) so it's always reachable while
+     a forecast is rendering. */
+  z-index: 1100;
   border: none;
   border-radius: 999px;
-  padding: 0.75rem 1.25rem;
-  font-size: var(--pi-fs-base);
+  /* Larger 56 px hit-target meets WCAG 2.5.5 AA (target size 44 px
+     min) with comfortable padding for touch + mouse. */
+  min-height: 56px;
+  padding: 0.95rem 1.5rem;
+  font-size: var(--pi-fs-md);
   font-weight: 600;
   color: #fff;
   background: var(--pi-brand);
-  box-shadow: 0 6px 24px rgba(43, 79, 129, 0.35);
+  box-shadow: 0 8px 28px rgba(43, 79, 129, 0.45);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -804,6 +810,64 @@ select:focus, textarea:focus {
   content: "Starting…";
   color: var(--pi-text-muted);
   font-style: italic;
+}
+
+
+/* ------------------------------------------------------------------- *
+ *  Dark-mode legibility patches
+ * ------------------------------------------------------------------- *
+ * Bootstrap's default alert / table / muted-text colour stack assumes
+ * a light background. In our dark theme, alert-info and table cells
+ * fall to barely-readable grey-on-grey. These rules pull the
+ * contrast ratios back over WCAG 2.1 AA (≥ 4.5 : 1 for body text).
+ */
+@media (prefers-color-scheme: dark) {
+  /* Alert-info — used for the EDA metadata strip + the LFPR caveat */
+  .alert-info {
+    background: rgba(107, 160, 219, 0.12);
+    color: var(--pi-text);
+    border-color: rgba(107, 160, 219, 0.45);
+  }
+  .alert-info p, .alert-info b {
+    color: var(--pi-text);
+  }
+  .alert-warning {
+    background: rgba(228, 182, 94, 0.10);
+    color: var(--pi-text);
+    border-color: rgba(228, 182, 94, 0.4);
+  }
+  .alert-warning b, .alert-warning strong {
+    color: var(--pi-warn);
+  }
+  /* Bootstrap tables — make the alternating rows actually distinct */
+  .table, .table-sm {
+    color: var(--pi-text);
+  }
+  .table thead th {
+    color: var(--pi-text-muted);
+    background: var(--pi-surface-alt);
+    border-bottom-color: var(--pi-border-strong);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: var(--pi-fs-xs);
+  }
+  .table-striped > tbody > tr:nth-of-type(odd) > * {
+    background: rgba(107, 160, 219, 0.05);
+    color: var(--pi-text);
+  }
+  .table-striped > tbody > tr:nth-of-type(even) > * {
+    color: var(--pi-text);
+  }
+  /* Bootstrap muted text was too dark on dark surfaces */
+  .text-muted, .pi-muted {
+    color: var(--pi-text-muted) !important;
+  }
+  .pi-subtle {
+    color: var(--pi-text-subtle);
+  }
+  /* Verdict cells in the LFP requirements table */
+  .text-success { color: var(--pi-ok)     !important; font-weight: 600; }
+  .text-danger  { color: var(--pi-danger) !important; font-weight: 600; }
 }
 
 

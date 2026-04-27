@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 from utils.agents.base import LaborAgent, LaborAgentConfig
+from utils.constants import DEFAULT_TIMEOUT
 
 CHAT_MODEL_ENV = "OLLAMA_MODEL"
 AGENT_MODEL_ENV = "OLLAMA_AGENT_MODEL"
@@ -37,7 +38,7 @@ def chat_agent(
     *,
     system_prompt: str = _CHAT_SYSTEM_PROMPT,
     temperature: float = 0.2,
-    timeout: int = 180,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> LaborAgent:
     """User-facing chat agent (defaults to llama3.2:3b via OLLAMA_MODEL)."""
     config = LaborAgentConfig(
@@ -55,7 +56,7 @@ def worker_agent(
     *,
     system_prompt: str = _WORKER_SYSTEM_PROMPT,
     temperature: float = 0.1,
-    timeout: int = 120,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> LaborAgent:
     """Background worker agent (defaults to phi3 via OLLAMA_AGENT_MODEL)."""
     config = LaborAgentConfig(

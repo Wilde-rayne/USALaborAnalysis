@@ -19,7 +19,13 @@ OLLAMA_EMBED_PATH = os.getenv("OLLAMA_EMBED_PATH", "/api/embeddings")
 OLLAMA_API_PATH   = OLLAMA_CHAT_PATH
 OLLAMA_URL       = get_env("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL     = get_env("OLLAMA_MODEL", "llama2:chat")
-DEFAULT_TIMEOUT  = get_env("OLLAMA_TIMEOUT", 180, int)
+#: HTTP read-timeout for individual Ollama calls. Single-CPU Ollama
+#: serializes inference, so a tab that fans out 4 panel blurbs queues
+#: behind earlier in-flight calls. 600 s (10 min) is generous enough
+#: for ~4-6 queued ~30-60 s calls; the previous 180 s default produced
+#: cascade timeouts on the requirements / trend / recap blurbs once
+#: the user touched a second tab before the first finished cooking.
+DEFAULT_TIMEOUT  = get_env("OLLAMA_TIMEOUT", 600, int)
 # --- API credentials (see .env.example) ---
 # BLS: optional — requests without a key work but are capped at 25 queries/day
 # and limited to 10 years per series. Register free at

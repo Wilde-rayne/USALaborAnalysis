@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import logging
 
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
@@ -631,9 +633,25 @@ def register_callbacks(app):
                 None,   # active-view cleared
             )
 
-        # Build historic + forecast traces.
+        # ----- Forecast horizon with the Phase-J gap -----
+        # The user wants predictions to start at the *next-year boundary*
+        # so the chart visually distinguishes data already collected, the
+        # months that have elapsed but BLS hasn't published yet (the
+        # "data lag"), and the model's forward look.
         last_date = df["date"].max()
-        forecast_dates = [last_date + pd.DateOffset(months=i + 1) for i in range(months)]
+        gap_anchor = pd.Timestamp(year=datetime.now().year + 1, month=1, day=1)
+        gap_months = max(
+            0,
+            (gap_anchor.year - last_date.year) * 12 + (gap_anchor.month - last_date.month) - 1,
+        )
+        # Predict far enough ahead that the last ``months`` predictions
+        # land on or after ``gap_anchor``; we slice off the gap portion
+        # from the displayed forecast so the line starts at the
+        # current-year boundary instead of immediately after the last
+        # actual observation.
+        total_horizon = gap_months + months
+        gap_dates = [last_date + pd.DateOffset(months=i + 1) for i in range(gap_months)]
+        forecast_dates = [last_date + pd.DateOffset(months=gap_months + i + 1) for i in range(months)]
 
         # Colour palette: focus brand-blue, peers cycle through Plotly D3.
         palette = [
@@ -669,9 +687,12 @@ def register_callbacks(app):
                 line=dict(color="rgba(31,119,180,0.55)", width=2, dash="dash"),
             )
         )
-        focus_interval = focus_result.model.predict_interval(months, alpha=0.05)
+        focus_interval = focus_result.model.predict_interval(total_horizon, alpha=0.05)
         if focus_interval is not None:
-            preds, lower, upper = focus_interval
+            preds_full, lower_full, upper_full = focus_interval
+            preds = preds_full[gap_months:]
+            lower = lower_full[gap_months:]
+            upper = upper_full[gap_months:]
             traces.append(
                 go.Scatter(
                     x=forecast_dates,
@@ -695,7 +716,8 @@ def register_callbacks(app):
                 )
             )
         else:
-            preds = focus_result.model.predict(months)
+            preds = focus_result.model.predict(total_horizon)[gap_months:]
+            lower = upper = preds
         traces.append(
             go.Scatter(
                 x=forecast_dates,
@@ -731,7 +753,7 @@ def register_callbacks(app):
             peer_result = state_forecasts.get(st)
             if peer_result is None:
                 continue
-            peer_preds = peer_result.model.predict(months)
+            peer_preds = peer_result.model.predict(total_horizon)[gap_months:]
             traces.append(
                 go.Scatter(
                     x=forecast_dates,
@@ -746,13 +768,111 @@ def register_callbacks(app):
                 )
             )
 
+        # Prediction is the focus on the LFP tab — default x-window
+        # is the last ~10 years of history + the full forecast, so the
+        # forecast takes ~30 % of the visible width instead of getting
+        # squeezed against the right edge. A range-slider lets the
+        # user drag back into deeper history when they want it.
+        x_default_start = pd.Timestamp(
+            year=max(int(df["date"].min().year), gap_anchor.year - 10),
+            month=1, day=1,
+        )
+        x_default_end = forecast_dates[-1] + pd.DateOffset(months=2)
+
         fig = go.Figure(traces)
         fig.update_layout(
-            title=f"{metric_label} — {focus_state} (+{years_ahead} yrs)",
-            xaxis_title="Date",
-            yaxis_title=f"{metric_label} (%)",
+            title=dict(
+                text=(
+                    f"{metric_label} — {focus_state} (forecast starts {gap_anchor.year})"
+                ),
+                x=0,
+                xanchor="left",
+                font=dict(size=15),
+            ),
+            xaxis=dict(
+                title=dict(text="Date", standoff=12),
+                showgrid=True,
+                gridcolor="rgba(127,127,127,0.18)",
+                zeroline=False,
+                range=[x_default_start.strftime("%Y-%m-%d"),
+                       x_default_end.strftime("%Y-%m-%d")],
+                rangeselector=dict(
+                    buttons=[
+                        dict(label="3y",  count=3,  step="year", stepmode="backward"),
+                        dict(label="10y", count=10, step="year", stepmode="backward"),
+                        dict(label="All", step="all"),
+                    ],
+                    bgcolor="rgba(255,255,255,0.65)",
+                    activecolor="#2c7be5",
+                ),
+                rangeslider=dict(visible=False),
+            ),
+            yaxis=dict(
+                title=dict(text=f"{metric_label} (%)", standoff=8),
+                showgrid=True,
+                gridcolor="rgba(127,127,127,0.18)",
+                zeroline=False,
+                ticksuffix="%",
+            ),
             template="plotly_white",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="left",
+                x=0,
+                font=dict(size=11),
+            ),
+            hoverlabel=dict(bgcolor="white", font=dict(size=12)),
+            margin=dict(l=70, r=30, t=80, b=60),
+            plot_bgcolor="rgba(255,255,255,0)",
+            paper_bgcolor="rgba(255,255,255,0)",
+        )
+        # Phase J: visualise the data-lag gap so the user can see the
+        # months where data is real-but-unpublished (no line) vs the
+        # forward forecast (full line + CI fan). Use the low-level
+        # ``add_shape`` + ``add_annotation`` API — the convenience
+        # ``add_vrect`` / ``add_vline`` helpers do internal integer-
+        # date arithmetic that breaks on Timestamps and ISO strings.
+        gap_anchor_iso = gap_anchor.strftime("%Y-%m-%d")
+        if gap_months > 0:
+            fig.add_shape(
+                type="rect",
+                xref="x", yref="paper",
+                x0=gap_dates[0].strftime("%Y-%m-%d"),
+                x1=gap_anchor_iso,
+                y0=0, y1=1,
+                fillcolor="rgba(120, 120, 120, 0.10)",
+                line=dict(width=0),
+                layer="below",
+            )
+            fig.add_annotation(
+                xref="x", yref="paper",
+                x=gap_dates[0].strftime("%Y-%m-%d"),
+                y=0.97,
+                text=f"Data lag — {gap_months} mo not yet published",
+                showarrow=False,
+                xanchor="left",
+                font=dict(size=11, color="rgba(40, 40, 40, 0.85)"),
+                bgcolor="rgba(255, 255, 255, 0.65)",
+            )
+        fig.add_shape(
+            type="line",
+            xref="x", yref="paper",
+            x0=gap_anchor_iso, x1=gap_anchor_iso,
+            y0=0, y1=1,
+            line=dict(color="rgba(60, 60, 60, 0.55)", dash="dot", width=1.5),
+        )
+        fig.add_annotation(
+            xref="x", yref="paper",
+            x=gap_anchor_iso,
+            y=0.97,
+            text=f"Forecast starts {gap_anchor.year}",
+            showarrow=False,
+            xanchor="left",
+            xshift=4,
+            font=dict(size=11),
+            bgcolor="rgba(255, 255, 255, 0.65)",
         )
 
         # Trend summary across every state in scope.
@@ -765,8 +885,13 @@ def register_callbacks(app):
 
         # Resolve every state's point + CI once so the requirements
         # table and the AI's pass/fail classifier read from the same
-        # numbers — eliminates a second predict_interval pass.
-        forecast_points = _compute_forecast_points(all_states, state_forecasts, months)
+        # numbers as the chart. Uses ``total_horizon`` (gap + horizon)
+        # so the verdict reflects the *current_year+1 → +N years*
+        # window the user actually sees, not the BLS-data-lag
+        # months we hide behind the gap band.
+        forecast_points = _compute_forecast_points(
+            all_states, state_forecasts, total_horizon
+        )
         threshold_value = float(threshold) if threshold not in (None, "") else None
         match_panel = _requirements_match_table(
             states_in_scope=all_states,
@@ -794,13 +919,16 @@ def register_callbacks(app):
 
         forecast_view = {
             "_kind": "forecast_panel",
-            "title": f"{focus_state} {metric_label} forecast (+{years_ahead} yrs)",
+            "title": f"{focus_state} {metric_label} forecast (starts {gap_anchor.year})",
             "focus_state": focus_state,
             "peer_states": list(peer_states),
             "metric_key": metric,
             "horizon_years": years_ahead,
             "last_actual_year": last_actual_year,
             "last_actual_value": _round2(last_actual_value),
+            "forecast_start_year": int(gap_anchor.year),
+            "forecast_end_year": int(gap_anchor.year) + years_ahead - 1,
+            "data_lag_months": int(gap_months),
             "forecast_point": _round2(focus_points.get("point")),
             "forecast_ci": (
                 [_round2(focus_points["ci_lo"]), _round2(focus_points["ci_hi"])]

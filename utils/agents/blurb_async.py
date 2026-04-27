@@ -107,48 +107,75 @@ def is_done(run_id: str) -> bool:
 # Internals
 # --------------------------------------------------------------------------
 def _fill_blurbs(run_id: str, view_states: Mapping[str, dict | None]) -> None:
-    """Daemon thread body — fill panels sequentially, surface progress."""
-    completed = 0
-    sections = list(view_states.keys())
-    total = sum(1 for v in view_states.values() if v)
-    for section in sections:
-        view_state = view_states.get(section)
-        if not view_state:
-            with _state_lock:
-                state = _run_state.get(run_id)
-                if state is not None:
-                    state[section] = ""  # marker: nothing to render
-            continue
+    """
+    Daemon thread body. Splits ``view_states`` into "panels" (run in
+    parallel via :class:`BlurbOrchestrator`) and "recap" (run after
+    panels settle so it can weave the reviewed panel narratives).
+    Each section's final text lands in ``_run_state[run_id][section]``
+    via the orchestrator's ``on_section_done`` callback so the polling
+    callback in the tab can show panels arriving as they're ready.
+    """
+    # Lazy import — keeps the orchestrator's executor + reviewer out
+    # of the module-load critical path for callers that just want the
+    # state dict (e.g. tests).
+    from utils.agents.blurb_orchestra import BlurbOrchestrator  # noqa: PLC0415
 
-        with _state_lock:
-            state = _run_state.get(run_id)
-            if state is not None:
-                state["status"] = f"generating panel {completed + 1} of {total}: {section}"
+    panel_views = {k: v for k, v in view_states.items() if k != "recap"}
+    recap_view = view_states.get("recap")
+    total_panels = sum(1 for v in panel_views.values() if v)
+    total_with_recap = total_panels + (1 if recap_view else 0)
+    completed = [0]  # mutable cell for the closure below
 
-        try:
-            mode = "recap" if section == "recap" else "panel"
-            text = explain_view(view_state, mode=mode)
-        except Exception as exc:  # noqa: BLE001 — full trace stays server-side
-            logger.warning(
-                "[blurb-async] section=%s failed: %s: %s",
-                section, type(exc).__name__, exc,
-                exc_info=True,
-            )
-            text = f"_{AI_FAILURE_MESSAGE}_"
-
-        completed += 1
+    def _on_section_done(section: str, text: str) -> None:
+        completed[0] += 1
         with _state_lock:
             state = _run_state.get(run_id)
             if state is None:
-                # Caller cleared the run before we finished; abort.
                 return
             state[section] = text
-            state["completed"] = completed
+            state["completed"] = completed[0]
+            if completed[0] < total_with_recap:
+                state["status"] = (
+                    f"reviewed {completed[0]} of {total_with_recap} "
+                    f"section(s); next: {'recap' if completed[0] >= total_panels else '…'}"
+                )
+            else:
+                state["status"] = "done"
+
+    # Mark sections we'll never produce (caller passed None) up front
+    # so the polling callback's placeholder logic can tell "nothing to
+    # render" apart from "still cooking".
+    with _state_lock:
+        state = _run_state.get(run_id)
+        if state is not None:
+            for k, v in view_states.items():
+                if not v:
+                    state[k] = ""
             state["status"] = (
-                f"generated panel {completed} of {total}: {section}"
-                if completed < total
-                else "done"
+                f"dispatching {total_panels} panel specialist(s) in parallel"
             )
+
+    try:
+        with BlurbOrchestrator(max_workers=4, max_retries=1) as orch:
+            orch.run_pipeline(
+                panel_views=panel_views,
+                recap_view=recap_view,
+                on_section_done=_on_section_done,
+            )
+    except Exception as exc:  # noqa: BLE001 — never let the runner kill the worker
+        logger.warning(
+            "[blurb-async] orchestrator failed for run %s: %s: %s",
+            run_id, type(exc).__name__, exc,
+            exc_info=True,
+        )
+        with _state_lock:
+            state = _run_state.get(run_id)
+            if state is not None:
+                # Ensure any sections that didn't land get a fallback so
+                # the polling callback can stop spinning on them.
+                for k in view_states:
+                    if state.get(k) is None:
+                        state[k] = f"_{AI_FAILURE_MESSAGE}_"
 
     with _state_lock:
         state = _run_state.get(run_id)
