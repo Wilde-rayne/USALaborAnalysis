@@ -313,6 +313,11 @@ app.layout = html.Div(
         ),
         # One-shot chat drawer — replaces the per-tab chat strips.
         _render_chat_drawer(),
+        # Global "what is the user looking at" payload — each tab's
+        # main callback writes its current view_state here so the
+        # chat drawer can ground its answers in the panels visible on
+        # screen instead of just the user's question text.
+        dcc.Store(id="pi-active-view", storage_type="session", data=None),
     ]
 )
 

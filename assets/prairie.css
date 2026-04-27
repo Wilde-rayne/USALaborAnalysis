@@ -783,6 +783,29 @@ select:focus, textarea:focus {
   opacity: 0.75;
 }
 
+/* Top-of-tab progress strip — drives the per-panel "Generating X
+   of N" feedback so the user never stares at a frozen page during
+   the slow Ollama leg. role=status + aria-live makes it accessible. */
+.pi-progress-strip {
+  background: var(--pi-surface-subtle, #f7f8fa);
+  border: 1px solid var(--pi-border);
+  border-left: 3px solid var(--pi-accent, #2c7be5);
+  border-radius: var(--pi-radius-sm);
+  padding: var(--pi-sp-3) var(--pi-sp-4);
+  margin-bottom: var(--pi-sp-4);
+  font-size: var(--pi-fs-sm);
+  line-height: 1.5;
+  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
+}
+
+.pi-progress-text:empty::before {
+  content: "Starting…";
+  color: var(--pi-text-muted);
+  font-style: italic;
+}
+
 
 /* ------------------------------------------------------------------- *
  *  6. Accessibility / reduced-motion / print

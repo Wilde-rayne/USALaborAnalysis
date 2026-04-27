@@ -24,6 +24,7 @@ from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
 from utils.llm_utils import AI_FAILURE_MESSAGE, generate_insight
+from utils.agents.sentence_rag import default_rag_builder
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +192,9 @@ def register_callbacks(app) -> None:
         State("chat-drawer-input", "value"),
         State("tabs", "active_tab"),
         State("chat-drawer-history", "data"),
+        State("pi-active-view", "data"),
     )
-    def submit_chat(n_clicks, query, active_tab, history):
+    def submit_chat(n_clicks, query, active_tab, history, active_view):
         if not n_clicks or not query or not query.strip():
             raise PreventUpdate
         cleaned = query.strip()
@@ -212,8 +214,17 @@ def register_callbacks(app) -> None:
             })
             return history, _render_history(history), ""
         history.append({"role": "user", "text": cleaned})
+        # Glue the user's prompt to whatever the active tab last
+        # rendered — the chat answer is then grounded in the figures
+        # the user is literally looking at, not just RAG keywords.
+        view_prefix = _render_active_view_context(active_view)
+        prompt = (
+            f"{view_prefix}\n\nUser question: {cleaned}"
+            if view_prefix
+            else cleaned
+        )
         try:
-            answer = generate_insight(cleaned, active_tab=active_tab)
+            answer = generate_insight(prompt, active_tab=active_tab)
         except Exception as exc:  # noqa: BLE001 — full trace stays server-side
             logger.warning(
                 "[chat-drawer] generate_insight failed: %s: %s",
@@ -226,3 +237,36 @@ def register_callbacks(app) -> None:
             answer = f"_{AI_FAILURE_MESSAGE}_"
         history.append({"role": "assistant", "text": answer})
         return history, _render_history(history), ""
+
+
+def _render_active_view_context(active_view: dict | None) -> str:
+    """
+    Turn the global ``pi-active-view`` payload into ontology-aware
+    sentences the chat drawer can prepend to the user's prompt.
+
+    Every tab that wants its rendered output to ground chat answers
+    writes ``{"tab": "<id>", "panels": [view_state, ...], "recap":
+    view_state}`` into the Store; we run those view_states through
+    the same :class:`SentenceRAGBuilder` the per-panel blurbs use, so
+    the LLM sees plain English ("Iowa labor force participation rate
+    is currently 64.5%, down 1.2 pp over five years") rather than
+    raw key/value dumps.
+    """
+    if not isinstance(active_view, dict):
+        return ""
+    panels = active_view.get("panels") or []
+    recap = active_view.get("recap")
+    builder = default_rag_builder()
+    sentences: list[str] = []
+    for panel in panels:
+        sentences.extend(builder.render_view_sentences(panel))
+    if recap:
+        sentences.extend(builder.render_view_sentences(recap))
+    if not sentences:
+        return ""
+    body = "\n".join(f"- {s}" for s in sentences)
+    return (
+        "Active dashboard view (use these facts to ground your answer; "
+        "do not invent values):\n"
+        f"{body}"
+    )

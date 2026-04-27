@@ -92,12 +92,44 @@ _tokenizer = AutoTokenizer.from_pretrained(_model_name)
 # Internals
 # --------------------------------------------------------------------------
 def _get_st_model() -> SentenceTransformer:
-    """Lazy-init the SentenceTransformer; reuse for every call."""
+    """
+    Lazy-init the SentenceTransformer; reuse for every call.
+
+    Forces CPU explicitly because (a) the dashboard container has no
+    GPU and (b) recent ``torch`` + ``sentence-transformers`` versions
+    sometimes load the model with weights on the ``meta`` device
+    when CUDA is *probed but unavailable*, then fail with
+    ``Cannot copy out of meta tensor; no data!`` on the first
+    ``encode()`` — silently breaking RAG retrieval. The post-load
+    warm-up forward pass surfaces any remaining materialization
+    issues at startup rather than mid-request.
+    """
     global _st_model
     if _st_model is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = torch.device("cpu")
         logger.info(f"[EMB] loading SentenceTransformer({_model_name}) on {device}")
-        _st_model = SentenceTransformer(_model_name, device=device)
+        _st_model = SentenceTransformer(_model_name, device=str(device))
+        _st_model.eval()
+        # Materialize any meta-device parameters by running a tiny
+        # forward pass while we still hold the lazy-init exception
+        # surface. If this fails we'd rather crash gunicorn now than
+        # have RAG retrieval skip silently from then on.
+        try:
+            _st_model.encode(["warmup"], show_progress_bar=False, convert_to_numpy=True)
+        except NotImplementedError as exc:
+            # ``Cannot copy out of meta tensor`` lands here on torch>=2.6
+            # with sentence-transformers<3 if the model object held
+            # meta-only weights. Re-load with ``low_cpu_mem_usage=False``
+            # via the underlying transformers args to force eager load.
+            logger.warning(f"[EMB] meta-tensor warm-up failed: {exc}; reloading eager")
+            _st_model = SentenceTransformer(
+                _model_name,
+                device="cpu",
+                model_kwargs={"low_cpu_mem_usage": False},
+            )
+            _st_model.eval()
+            _st_model.encode(["warmup"], show_progress_bar=False, convert_to_numpy=True)
+        logger.info("[EMB] SentenceTransformer ready")
     return _st_model
 
 

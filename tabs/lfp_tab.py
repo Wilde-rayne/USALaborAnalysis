@@ -37,13 +37,15 @@ from utils.forecasting.trend import (
     rolling_statistics,
     summarize_trend,
 )
-from utils.llm_utils import explain_view
+from utils.agents import blurb_async
+from utils.llm_utils import AI_FAILURE_MESSAGE, explain_view
 from utils.ontology import ONTOLOGY
 from tabs._methodology import LFPR_DENOMINATOR_NOTE, methodology_panel
 from tabs._components import (
     PANEL_BLURB_TYPE,
     error_boundary,
     figure_panel,
+    progress_strip,
     render_blurb,
     tab_recap,
 )
@@ -497,16 +499,22 @@ def render_layout():
                 className="pi-selector-grid",
             ),
             dcc.Loading(id="loading-lfp", children=html.Div(id="lfp-output")),
-            # Cross-callback channel: the main callback drops a dict of
-            # view_state payloads keyed by section ("forecast",
-            # "requirements", "trend", "recap"). A single multiplexed
-            # MATCH-pattern callback fans out one Ollama call per
-            # section, so the chart paints first and each AI panel
-            # populates as soon as its specific call returns. Section
-            # IDs use ``{"type": PANEL_BLURB_TYPE, "tab": "lfp",
-            # "section": ...}`` so multiple tabs can share the same
-            # filler without colliding.
+            # Run-id channel: the main click callback spawns a daemon
+            # thread that fills ``utils.agents.blurb_async._run_state``
+            # as each panel completes. The polling callback below
+            # reads from there every ~2 s and updates only the panels
+            # that have populated since the last tick — every panel
+            # pops in as soon as its individual Ollama call returns.
             dcc.Store(id="lfp-blurb-payload", data=None),
+            # Tick driver. Disabled by default; enabled by the click
+            # callback and disabled again by the poll callback once
+            # every panel has filled.
+            dcc.Interval(
+                id="lfp-progress-tick",
+                interval=2_000,
+                n_intervals=0,
+                disabled=True,
+            ),
         ]
     )
 
@@ -573,6 +581,9 @@ def register_callbacks(app):
     @app.callback(
         Output("lfp-output", "children"),
         Output("lfp-blurb-payload", "data"),
+        Output("lfp-progress-tick", "disabled"),
+        Output("lfp-progress-tick", "n_intervals"),
+        Output("pi-active-view", "data"),
         Input("lfp-run", "n_clicks"),
         State("lfp-focus-state", "value"),
         State("lfp-peer-states", "value"),
@@ -580,7 +591,7 @@ def register_callbacks(app):
         State("lfp-years-slider", "value"),
         State("lfp-threshold", "value"),
     )
-    @error_boundary(fallback_id="lfp-output", extra_outputs=1)
+    @error_boundary(fallback_id="lfp-output", extra_outputs=4)
     def update_lfp(n_clicks, focus_state, peer_states, metric, years_ahead, threshold):
         if not n_clicks:
             raise PreventUpdate
@@ -588,6 +599,9 @@ def register_callbacks(app):
             return (
                 html.Div("Pick a focus state first.", className="alert alert-warning"),
                 None,
+                True,   # interval disabled
+                0,      # n_intervals reset
+                None,   # active-view cleared
             )
 
         df = _load_lfp_panel()
@@ -611,6 +625,9 @@ def register_callbacks(app):
                     className="alert alert-warning",
                 ),
                 None,
+                True,   # interval disabled
+                0,      # n_intervals reset
+                None,   # active-view cleared
             )
 
         # Build historic + forecast traces.
@@ -840,8 +857,23 @@ def register_callbacks(app):
             else None
         )
 
+        # ----- Spawn the background blurb runner -----
+        # The Day-1 single-callback architecture meant a 2-min "dead
+        # zone" where every panel was generated sequentially behind
+        # one HTTP fetch. Now we hand the view_states to a daemon
+        # thread that fills a per-process state slot keyed by
+        # ``run_id``; the polling callback below picks them up as
+        # each panel completes so the user sees panels arrive
+        # individually instead of all at once.
+        run_id = blurb_async.start_run({
+            "forecast":     forecast_view,
+            "requirements": requirements_view,
+            "trend":        trend_view,
+            "recap":        recap_view,
+        })
+
         # ----- Interleaved body: figure → AI → figure → AI → recap -----
-        body: list = []
+        body: list = [progress_strip("lfp-progress-status")]
         if caveat is not None:
             body.append(caveat)
         body.extend([
@@ -881,56 +913,84 @@ def register_callbacks(app):
             methodology_panel(),
         ])
 
-        payload = {
-            "forecast": forecast_view,
-            "requirements": requirements_view,
-            "trend": trend_view,
+        payload = {"run_id": run_id, "n": int(n_clicks)}
+
+        # Active-view payload for cross-tab AI surfaces (chat drawer
+        # reads this Store on every send so its answers reflect what
+        # the user is currently looking at, not just their question).
+        active_view = {
+            "tab": "lfp",
+            "panels": [forecast_view, requirements_view, trend_view],
             "recap": recap_view,
-            # ``n`` is included so the Store actually changes value
-            # between identical-parameter clicks (Dash's MATCH callback
-            # ignores re-emissions of unchanged data).
-            "n": int(n_clicks),
         }
-        return html.Div(body), payload
+        return (
+            html.Div(body),
+            payload,
+            False,        # interval enabled
+            0,            # n_intervals reset
+            active_view,  # cross-tab view-state for chat drawer
+        )
 
     @app.callback(
         Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "forecast"},     "children"),
         Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "requirements"}, "children"),
         Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "trend"},        "children"),
         Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "recap"},        "children"),
-        Input("lfp-blurb-payload", "data"),
+        Output("lfp-progress-status", "children"),
+        Output("lfp-progress-tick", "disabled"),
+        Input("lfp-progress-tick", "n_intervals"),
+        State("lfp-blurb-payload", "data"),
         prevent_initial_call=True,
     )
-    @error_boundary(fallback_id="lfp-panel-blurb", extra_outputs=3)
-    def fill_lfp_blurbs(payload):
+    @error_boundary(fallback_id="lfp-progress-status", extra_outputs=5)
+    def poll_lfp_blurbs(_n_intervals, payload):
         """
-        Sequentially generate all four panel narratives in **one** HTTP
-        request. The earlier MATCH-pattern fan-out fired four parallel
-        long-poll fetches, which Chrome throttles and drops with
-        ``net::ERR_NETWORK_IO_SUSPENDED``; one long single fetch is
-        much more robust to browser-side connection management at the
-        cost of "trickle in" UX. ``explain_view`` is LRU-cached on
-        (view_state JSON, mode, model) so re-runs of the same
-        parameters return instantly.
+        Tick-driven polling callback. Reads the per-process run state
+        produced by :mod:`utils.agents.blurb_async` and updates only
+        the panels that have populated since the last tick — each
+        panel pops in as soon as its individual Ollama call returns,
+        so the user never sees a 2-minute dead zone.
+        Disables the interval once every panel has filled to stop the
+        ~2 s ticks from continuing to fire.
         """
-        if not payload:
+        if not payload or "run_id" not in payload:
             raise PreventUpdate
-        out: list = []
-        for section in ("forecast", "requirements", "trend", "recap"):
-            view_state = payload.get(section)
-            if not view_state:
-                # Empty placeholder kept; reaching this branch means
-                # update_lfp didn't produce a view for this section.
-                out.append(html.Div(
-                    html.Em(
-                        "no panel context — re-run the forecast",
-                        className="pi-muted small",
-                    ),
+        snapshot = blurb_async.get_snapshot(payload["run_id"])
+        if not snapshot:
+            # Run was GC'd or never started — leave placeholders alone.
+            raise PreventUpdate
+
+        outs: list = []
+        for section in blurb_async.PANEL_SECTIONS:
+            text = snapshot.get(section)
+            if text is None:
+                outs.append(html.Em(
+                    f"Generating {section}…",
+                    className="pi-muted small",
                 ))
-                continue
-            mode = "recap" if section == "recap" else "panel"
-            text = explain_view(view_state, mode=mode)
-            out.append(render_blurb(text))
-        return tuple(out)
+            elif text == "":
+                # Caller explicitly skipped this section.
+                outs.append(html.Em(
+                    "no panel context — re-run the forecast",
+                    className="pi-muted small",
+                ))
+            else:
+                outs.append(render_blurb(text))
+
+        status_text = snapshot.get("status", "starting")
+        is_done = status_text == "done"
+        # Add a friendly "X of N done" header for screen readers and
+        # sighted users alike.
+        completed = snapshot.get("completed", 0)
+        total = snapshot.get("total", 0)
+        if is_done:
+            progress_msg = f"All {total} panel(s) ready."
+        else:
+            progress_msg = (
+                f"Generated {completed} of {total} panel(s). "
+                f"Working on the next one — Ollama is single-threaded "
+                f"and each panel takes ~30 s on CPU."
+            )
+        return (*outs, progress_msg, is_done)
 
     # Chat lives in the global chat drawer now — registered in app.py.

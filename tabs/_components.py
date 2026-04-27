@@ -206,6 +206,10 @@ def figure_panel(
     (e.g. ``{"type": PANEL_BLURB_TYPE, "tab": "lfp", "section":
     "forecast"}``) the deferred AI callback writes to. A ``caption``
     of ``None`` skips the caption row entirely.
+
+    Accessibility: the AI placeholder carries ``role="status"`` and
+    ``aria-live="polite"`` so screen readers announce when the
+    asynchronous narrative arrives without stealing focus.
     """
     children: list[Any] = [
         html.H6(title, className="pi-panel-title"),
@@ -220,6 +224,8 @@ def figure_panel(
             html.Em(placeholder, className="pi-muted small"),
             id=blurb_id,
             className="pi-panel-blurb",
+            role="status",
+            **{"aria-live": "polite", "aria-busy": "true"},
         )
     )
     return html.Div(children, className="pi-panel-tile")
@@ -244,9 +250,27 @@ def tab_recap(
                 html.Em(placeholder, className="pi-muted small"),
                 id=blurb_id,
                 className="pi-recap-blurb",
+                role="status",
+                **{"aria-live": "polite", "aria-busy": "true"},
             ),
         ],
         className="pi-recap-section",
+    )
+
+
+def progress_strip(progress_id: str) -> html.Div:
+    """
+    Top-of-tab progress region. Driven by the polling callback that
+    streams panel completions in. Carries ``role="status"`` +
+    ``aria-live="polite"`` so screen readers announce each transition
+    ("generating panel 1 of 4" → "generated panel 1 of 4: forecast" →
+    …) without interrupting the user's reading focus.
+    """
+    return html.Div(
+        html.Span("", id=progress_id, className="pi-progress-text"),
+        className="pi-progress-strip",
+        role="status",
+        **{"aria-live": "polite", "aria-atomic": "true"},
     )
 
 
