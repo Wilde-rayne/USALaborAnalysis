@@ -59,7 +59,18 @@ _embs: np.ndarray | None = None
 _chunk_tokens: List[set[str]] | None = None
 _st_model: SentenceTransformer | None = None
 
-CACHE_EMBEDDINGS = "embeddings_cache.npz"
+#: Persisted embedding matrix. Lives under HF_HOME (or TRANSFORMERS_CACHE
+#: as a fallback) so the non-root container user (added in c4ae737) can
+#: actually write it — relative paths resolve to ``/app/`` which is
+#: root-owned, which silently broke the cache and caused every chat /
+#: blurb call to re-embed 3.6 k chunks from scratch.
+_CACHE_DIR = (
+    os.environ.get("HF_HOME")
+    or os.environ.get("TRANSFORMERS_CACHE")
+    or os.path.expanduser("~/.cache")
+)
+os.makedirs(_CACHE_DIR, exist_ok=True)
+CACHE_EMBEDDINGS = os.path.join(_CACHE_DIR, "embeddings_cache.npz")
 MAX_TOKENS = 150
 BATCH_SIZE = 64
 
