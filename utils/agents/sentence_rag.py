@@ -317,6 +317,15 @@ class SentenceRAGBuilder:
             "requirements_panel": self._render_requirements_panel,
             "trend_panel": self._render_trend_panel,
             "recap": self._render_recap,
+            # EDA tab
+            "eda_overview": self._render_eda_overview,
+            "eda_timeseries": self._render_eda_timeseries,
+            "eda_distribution": self._render_eda_distribution,
+            "eda_volatility": self._render_eda_volatility,
+            # Super (supersector) tab
+            "supersector_forecast": self._render_supersector_forecast,
+            "supersector_recommendation": self._render_supersector_recommendation,
+            "supersector_models": self._render_supersector_models,
         }.get(kind, self._render_generic)
         return [s for s in renderer(view_state) if s]
 
@@ -476,6 +485,244 @@ class SentenceRAGBuilder:
 
     def _render_generic(self, vs: dict) -> list[str]:
         return [f"{k}: {v}" for k, v in vs.items() if not k.startswith("_") and k != "title"]
+
+    # --- EDA tab renderers ---
+    def _render_eda_overview(self, vs: dict) -> list[str]:
+        states = vs.get("states") or []
+        year_lo, year_hi = self._unpack_pair(vs.get("year_range"))
+        n_records = vs.get("n_records")
+        last_refresh = vs.get("last_refreshed")
+        sentences: list[str] = []
+        state_labels = [self._state_label(s) for s in states if s]
+        if state_labels:
+            sentences.append(
+                f"The exploratory view is currently scoped to "
+                f"{len(state_labels)} state(s): {', '.join(state_labels)}."
+            )
+        if year_lo and year_hi:
+            sentences.append(
+                f"The temporal window is {year_lo}–{year_hi} "
+                f"({year_hi - year_lo + 1} years)."
+            )
+        if n_records is not None:
+            sentences.append(
+                f"The merged labor panel currently holds "
+                f"{int(n_records):,} state-month records."
+            )
+        if last_refresh:
+            sentences.append(f"Data last refreshed: {last_refresh}.")
+        return sentences
+
+    def _render_eda_timeseries(self, vs: dict) -> list[str]:
+        measures = vs.get("measures") or []
+        states = vs.get("states") or []
+        rows = vs.get("series") or []
+        sentences: list[str] = []
+        if measures and states:
+            measure_labels = [self._measure_label(m) for m in measures if m]
+            sentences.append(
+                f"The time-series chart overlays "
+                f"{', '.join(measure_labels) or 'the selected measures'} "
+                f"for {len(states)} state(s) ({', '.join(self._state_label(s) for s in states[:8])}"
+                + (f", plus {len(states)-8} more" if len(states) > 8 else "")
+                + ")."
+            )
+        for row in rows[:6]:
+            label = self._state_label(row.get("state"))
+            measure = self._measure_label(row.get("measure"))
+            first, last = row.get("first"), row.get("last")
+            if not (label and measure and first is not None and last is not None):
+                continue
+            change = (last - first)
+            direction = "up" if change > 0 else "down" if change < 0 else "essentially flat"
+            sentences.append(
+                f"{label} {measure} moved from "
+                f"{self._fmt_value_with_unit(first, row.get('unit'))} to "
+                f"{self._fmt_value_with_unit(last, row.get('unit'))} "
+                f"({direction})."
+            )
+        return sentences
+
+    def _render_eda_distribution(self, vs: dict) -> list[str]:
+        measures = vs.get("measures") or []
+        rows = vs.get("series") or []
+        sentences: list[str] = []
+        if measures:
+            measure_labels = [self._measure_label(m) for m in measures if m]
+            sentences.append(
+                f"The distribution view summarises the spread of "
+                f"{', '.join(measure_labels) or 'the selected measures'} "
+                f"across the active scope."
+            )
+        for row in rows[:6]:
+            label = self._state_label(row.get("state"))
+            measure = self._measure_label(row.get("measure"))
+            mean = row.get("mean")
+            std = row.get("std")
+            if not (label and measure and mean is not None):
+                continue
+            unit = row.get("unit")
+            std_clause = (
+                f" (σ ≈ {self._fmt_value_with_unit(std, unit)})"
+                if std is not None
+                else ""
+            )
+            sentences.append(
+                f"{label} {measure}: mean "
+                f"{self._fmt_value_with_unit(mean, unit)}{std_clause}."
+            )
+        return sentences
+
+    def _render_eda_volatility(self, vs: dict) -> list[str]:
+        rows = vs.get("series") or []
+        window = vs.get("rolling_window_months")
+        sentences: list[str] = []
+        if window:
+            sentences.append(
+                f"The trend view shows {window}-month rolling means and "
+                f"year-over-year percent change for each selected series."
+            )
+        for row in rows[:6]:
+            label = self._state_label(row.get("state"))
+            measure = self._measure_label(row.get("measure"))
+            yoy_pct = row.get("yoy_pct")
+            if not (label and measure and yoy_pct is not None):
+                continue
+            direction = "above" if yoy_pct > 0 else "below"
+            sentences.append(
+                f"{label} {measure} is currently {abs(yoy_pct):.1f}% "
+                f"{direction} its level twelve months earlier."
+            )
+        return sentences
+
+    # --- Super (supersector) tab renderers ---
+    def _render_supersector_forecast(self, vs: dict) -> list[str]:
+        sector = vs.get("sector_label") or vs.get("sector") or "the selected sector"
+        horizon = vs.get("horizon_years")
+        region = vs.get("region_label") or vs.get("region")
+        rows = vs.get("states") or []
+        sentences: list[str] = []
+        scope_clause = (
+            f" across the {region} census region"
+            if region and region != "All states"
+            else " across the active scope"
+        )
+        if horizon:
+            sentences.append(
+                f"The {sector} +{horizon}-year forecast{scope_clause} "
+                f"covers {len(rows)} state(s) with their winning bake-off models."
+            )
+        leaders = sorted(
+            [r for r in rows if r.get("forecast") is not None],
+            key=lambda r: r["forecast"],
+            reverse=True,
+        )[:3]
+        for r in leaders:
+            label = self._state_label(r.get("code"))
+            ci_low, ci_high = self._unpack_pair([r.get("lower_ci"), r.get("upper_ci")])
+            ci_clause = (
+                f" (95% CI {self._fmt_value(ci_low)}–{self._fmt_value(ci_high)})"
+                if ci_low is not None and ci_high is not None
+                else ""
+            )
+            model = r.get("model")
+            model_clause = f", winning model {model.upper()}" if model else ""
+            sentences.append(
+                f"{label}: forecast {self._fmt_value(r.get('forecast'))}"
+                f"{ci_clause}{model_clause}."
+            )
+        return sentences
+
+    def _render_supersector_recommendation(self, vs: dict) -> list[str]:
+        sector = vs.get("sector_label") or vs.get("sector") or "the selected sector"
+        horizon = vs.get("horizon_years")
+        median = vs.get("median")
+        top = vs.get("top") or []
+        bottom = vs.get("bottom") or []
+        sentences: list[str] = []
+        if median is not None:
+            sentences.append(
+                f"The peer median for {sector} at the +{horizon}-year horizon "
+                f"is {self._fmt_value(median)}."
+            )
+        if top:
+            top_parts = [
+                f"{self._state_label(r.get('code'))} ({self._fmt_value(r.get('value'))})"
+                for r in top[:3]
+                if r.get("code") and r.get("value") is not None
+            ]
+            if top_parts:
+                sentences.append(
+                    f"Top recommendations for siting / expansion: {', '.join(top_parts)}."
+                )
+        if bottom:
+            bottom_parts = [
+                f"{self._state_label(r.get('code'))} ({self._fmt_value(r.get('value'))})"
+                for r in bottom[:3]
+                if r.get("code") and r.get("value") is not None
+            ]
+            if bottom_parts:
+                sentences.append(
+                    f"Trailing peers (recovery / divestment risk): {', '.join(bottom_parts)}."
+                )
+        return sentences
+
+    def _render_supersector_models(self, vs: dict) -> list[str]:
+        winners = vs.get("winners") or []
+        sentences: list[str] = []
+        if not winners:
+            return sentences
+        # Tally model picks across the in-scope states.
+        tally: dict[str, int] = {}
+        for w in winners:
+            m = (w.get("model") or "").lower()
+            if m:
+                tally[m] = tally.get(m, 0) + 1
+        if tally:
+            mix = ", ".join(
+                f"{count} × {name.upper()}"
+                for name, count in sorted(tally.items(), key=lambda kv: kv[1], reverse=True)
+            )
+            sentences.append(
+                f"Per-state bake-off model mix across {len(winners)} state(s): {mix}."
+            )
+        # Highlight outliers — states where RMSE is notably higher.
+        rmses = [w.get("rmse") for w in winners if w.get("rmse") is not None]
+        if rmses:
+            avg_rmse = sum(rmses) / len(rmses)
+            sentences.append(
+                f"Average out-of-sample RMSE across the in-scope models is "
+                f"{avg_rmse:.2f}."
+            )
+        return sentences
+
+    # --- formatting helpers (extras for new renderers) ---
+    def _unpack_pair(self, pair) -> tuple:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2:
+            return pair[0], pair[1]
+        return None, None
+
+    def _fmt_value(self, value) -> str:
+        """Generic numeric format for sector-level values (no unit / no percent)."""
+        if value is None:
+            return "n/a"
+        try:
+            return f"{float(value):,.1f}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    def _fmt_value_with_unit(self, value, unit: str | None) -> str:
+        if value is None:
+            return "n/a"
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if unit == "percent":
+            return f"{v:.1f}%"
+        if unit == "persons":
+            return f"{v:,.0f}"
+        return f"{v:,.2f}"
 
     # --- formatting helpers ---
     def _state_label(self, code: str | None) -> str:

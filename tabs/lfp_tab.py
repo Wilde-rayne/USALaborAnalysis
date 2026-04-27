@@ -583,13 +583,14 @@ def register_callbacks(app):
         Output("lfp-blurb-payload", "data"),
         Output("lfp-progress-tick", "disabled"),
         Output("lfp-progress-tick", "n_intervals"),
-        Output("pi-active-view", "data"),
+        Output("pi-active-view", "data", allow_duplicate=True),
         Input("lfp-run", "n_clicks"),
         State("lfp-focus-state", "value"),
         State("lfp-peer-states", "value"),
         State("lfp-metric", "value"),
         State("lfp-years-slider", "value"),
         State("lfp-threshold", "value"),
+        prevent_initial_call=True,
     )
     @error_boundary(fallback_id="lfp-output", extra_outputs=4)
     def update_lfp(n_clicks, focus_state, peer_states, metric, years_ahead, threshold):
@@ -937,7 +938,7 @@ def register_callbacks(app):
         Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "trend"},        "children"),
         Output({"type": PANEL_BLURB_TYPE, "tab": "lfp", "section": "recap"},        "children"),
         Output("lfp-progress-status", "children"),
-        Output("lfp-progress-tick", "disabled"),
+        Output("lfp-progress-tick", "disabled", allow_duplicate=True),
         Input("lfp-progress-tick", "n_intervals"),
         State("lfp-blurb-payload", "data"),
         prevent_initial_call=True,

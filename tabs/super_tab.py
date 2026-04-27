@@ -16,13 +16,20 @@ import plotly.graph_objs as go
 from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
+from utils.agents import blurb_async
 from utils.constants import ALL_STATES, MONTH_MAP, SUPERSECTORS
 from utils.data_pipeline import OUTPUT_JSON, ensure_data
 from utils.forecasting import ForecastResult, select_forecaster
 from utils.forecasting.models import default_candidates
-from utils.llm_utils import generate_insight
 from utils.ontology import ONTOLOGY
-from tabs._components import error_boundary
+from tabs._components import (
+    PANEL_BLURB_TYPE,
+    error_boundary,
+    figure_panel,
+    progress_strip,
+    render_blurb,
+    tab_recap,
+)
 from tabs._methodology import methodology_panel
 
 # Region options offered in the filter. Territories are grouped under
@@ -341,13 +348,24 @@ def render_layout():
                 className="pi-selector-grid",
             ),
             dcc.Loading(id="loading-super", children=html.Div(id="super-output")),
-            # Same progressive-render pattern as the LFP tab: the main
-            # callback drops a prompt here, the deferred blurb callback
-            # picks it up and fills ``super-blurb-area`` so the chart +
-            # tables paint without waiting on Ollama.
-            dcc.Store(id="super-blurb-prompt", data=None),
+            # Day-3: same threaded-runner + polling pattern as the LFP
+            # tab. ``update_super`` spawns a daemon-thread blurb runner,
+            # the polling callback below ticks every 2 s and fills each
+            # panel as its individual Ollama call returns.
+            dcc.Store(id="super-blurb-payload", data=None),
+            dcc.Interval(
+                id="super-progress-tick",
+                interval=2_000,
+                n_intervals=0,
+                disabled=True,
+            ),
         ]
     )
+
+
+def _blurb_id(section: str) -> dict:
+    """Pattern-matching ID convention shared with other tabs."""
+    return {"type": PANEL_BLURB_TYPE, "tab": "super", "section": section}
 
 
 def _apply_region_filter(entry: dict[str, ForecastResult], region: str) -> dict[str, ForecastResult]:
@@ -381,15 +399,19 @@ def _sort_states(
 def register_callbacks(app):
     @app.callback(
         Output("super-output", "children"),
-        Output("super-blurb-prompt", "data"),
+        Output("super-blurb-payload", "data"),
+        Output("super-progress-tick", "disabled"),
+        Output("super-progress-tick", "n_intervals"),
+        Output("pi-active-view", "data", allow_duplicate=True),
         Input("supersector-run", "n_clicks"),
         State("supersector-dropdown", "value"),
         State("supersector-region", "value"),
         State("supersector-sort", "value"),
         State("supersector-years-slider", "value"),
         State("supersector-threshold", "value"),
+        prevent_initial_call=True,
     )
-    @error_boundary(fallback_id="super-output", extra_outputs=1)
+    @error_boundary(fallback_id="super-output", extra_outputs=4)
     def update_super(n_clicks, sector, region, sort_mode, years_ahead, threshold):
         if not n_clicks:
             raise PreventUpdate
@@ -404,6 +426,9 @@ def register_callbacks(app):
                     f"selected region.",
                     className="alert alert-warning",
                 ),
+                None,
+                True,
+                0,
                 None,
             )
 
@@ -515,58 +540,191 @@ def register_callbacks(app):
             template="plotly_white",
         )
 
-        winner_counts: dict[str, int] = {}
-        for r in entry.values():
-            winner_counts[r.name] = winner_counts.get(r.name, 0) + 1
-        winner_summary = ", ".join(f"{n} × {c}" for n, c in winner_counts.items())
-        prompt = (
-            f"From forecasts for '{sector}' (+{years_ahead} years, "
-            f"region={region}, sort={sort_mode}): "
-            + ", ".join(f"{lbl} {flat_forecasts[lbl]:,.1f}" for lbl in labels if lbl in flat_forecasts)
-            + f". Per-state model selection: {winner_summary}. "
-            "Provide a concise 3-sentence analysis for regional planners."
-        )
+        # ----- Build typed view_state payloads -----
+        sector_label = sector.replace("_", " ")
+        region_label = "All states" if region in (None, "__all__") else region
 
-        # Inline placeholder for the deferred-blurb callback below.
-        blurb_placeholder = html.Div(
-            html.Em("Generating regional planner narrative…", className="pi-muted small"),
-            id="super-blurb-area",
-        )
+        forecast_view = {
+            "_kind": "supersector_forecast",
+            "title": f"{sector_label} +{years_ahead}-yr forecast",
+            "sector": sector,
+            "sector_label": sector_label,
+            "region_label": region_label,
+            "horizon_years": years_ahead,
+            "sort_mode": sort_mode,
+            "states": [
+                {
+                    "code":      c,
+                    "forecast":  round(state_summary[c]["value"], 1),
+                    "lower_ci":  round(state_summary[c]["lower"], 1),
+                    "upper_ci":  round(state_summary[c]["upper"], 1),
+                    "growth":    round(state_summary[c]["growth"], 2),
+                    "model":     state_summary[c]["model"],
+                    "rmse":      round(state_summary[c]["rmse"], 2),
+                }
+                for c in display_states
+            ],
+            "region_mean":   round(mean_val, 1),
+            "region_median": round(median_val, 1),
+        }
 
-        return (
-            html.Div(
-                [
-                    dcc.Graph(figure=fig),
-                    html.Hr(),
-                    _recommendation_panel(
-                        all_forecasts, sector=sector, years_ahead=years_ahead
-                    ),
-                    _selection_summary(entry),
-                    html.Hr(),
-                    blurb_placeholder,
-                    html.Hr(),
-                    methodology_panel(),
-                ]
+        # Top / bottom relative to median for the recommendation view.
+        sorted_by_value = sorted(
+            ((c, state_summary[c]["value"]) for c in state_summary),
+            key=lambda kv: kv[1],
+            reverse=True,
+        )
+        top = [
+            {"code": c, "value": round(v, 1)}
+            for c, v in sorted_by_value[:3]
+        ]
+        bottom = [
+            {"code": c, "value": round(v, 1)}
+            for c, v in sorted_by_value[-3:]
+        ]
+        recommendation_view = {
+            "_kind": "supersector_recommendation",
+            "title": f"Where to site {sector_label} (+{years_ahead}-yr horizon)",
+            "sector": sector,
+            "sector_label": sector_label,
+            "horizon_years": years_ahead,
+            "median": round(median_val, 1),
+            "top": top,
+            "bottom": bottom,
+        }
+
+        models_view = {
+            "_kind": "supersector_models",
+            "title": "Per-state bake-off winners",
+            "sector": sector,
+            "sector_label": sector_label,
+            "winners": [
+                {
+                    "code":  c,
+                    "model": state_summary[c]["model"],
+                    "rmse":  round(state_summary[c]["rmse"], 2),
+                    "mae":   round(entry[c].metrics.mae, 2),
+                    "bias":  round(entry[c].metrics.bias, 2),
+                }
+                for c in display_states
+            ],
+        }
+
+        recap_view = {
+            "_kind": "recap",
+            "title": f"{sector_label} ({region_label}) +{years_ahead}-yr outlook recap",
+            "panels": [forecast_view, recommendation_view, models_view],
+        }
+
+        # ----- Spawn background blurb runner -----
+        run_id = blurb_async.start_run({
+            "forecast":       forecast_view,
+            "recommendation": recommendation_view,
+            "models":         models_view,
+            "recap":          recap_view,
+        })
+
+        # ----- Interleaved body -----
+        body = [
+            progress_strip("super-progress-status"),
+            figure_panel(
+                title=forecast_view["title"],
+                figure=dcc.Graph(figure=fig),
+                caption=(
+                    f"Bars: per-state forecast at +{years_ahead} years. "
+                    f"Error bars: 95 % prediction interval from each "
+                    f"state's winning model."
+                ),
+                blurb_id=_blurb_id("forecast"),
             ),
-            {"prompt": prompt, "n": int(n_clicks)},
+            figure_panel(
+                title=recommendation_view["title"],
+                figure=_recommendation_panel(
+                    all_forecasts, sector=sector, years_ahead=years_ahead
+                ),
+                caption=(
+                    f"Top / bottom 3 vs the across-state median "
+                    f"({median_val:,.1f}). Use as a regional siting prior."
+                ),
+                blurb_id=_blurb_id("recommendation"),
+            ),
+            figure_panel(
+                title=models_view["title"],
+                figure=_selection_summary(entry),
+                caption=(
+                    "Naive / Seasonal-Naive / ETS bake-off winners per "
+                    "state. Mixed picks signal methodological uncertainty; "
+                    "uniform picks signal stable signal in the data."
+                ),
+                blurb_id=_blurb_id("models"),
+            ),
+            tab_recap(
+                title="Recap & deeper detail",
+                blurb_id=_blurb_id("recap"),
+            ),
+            html.Hr(),
+            methodology_panel(),
+        ]
+
+        active_view = {
+            "tab": "super",
+            "panels": [forecast_view, recommendation_view, models_view],
+            "recap": recap_view,
+        }
+        payload = {"run_id": run_id, "n": int(n_clicks)}
+        return (
+            html.Div(body),
+            payload,
+            False,
+            0,
+            active_view,
         )
 
     @app.callback(
-        Output("super-blurb-area", "children"),
-        Input("super-blurb-prompt", "data"),
+        Output({"type": PANEL_BLURB_TYPE, "tab": "super", "section": "forecast"},       "children"),
+        Output({"type": PANEL_BLURB_TYPE, "tab": "super", "section": "recommendation"}, "children"),
+        Output({"type": PANEL_BLURB_TYPE, "tab": "super", "section": "models"},         "children"),
+        Output({"type": PANEL_BLURB_TYPE, "tab": "super", "section": "recap"},          "children"),
+        Output("super-progress-status", "children"),
+        Output("super-progress-tick", "disabled", allow_duplicate=True),
+        Input("super-progress-tick", "n_intervals"),
+        State("super-blurb-payload", "data"),
         prevent_initial_call=True,
     )
-    @error_boundary(fallback_id="super-blurb-area")
-    def update_super_blurb(payload):
-        """Deferred narrative pass — same shape as the LFP equivalent."""
-        if not payload or not payload.get("prompt"):
+    @error_boundary(fallback_id="super-progress-status", extra_outputs=5)
+    def poll_super_blurbs(_n, payload):
+        """Tick-driven polling — same shape as the LFP / EDA pollers."""
+        if not payload or "run_id" not in payload:
             raise PreventUpdate
-        insight = generate_insight(payload["prompt"], active_tab="super")
-        return html.Div(
-            [
-                dcc.Markdown(insight),
-                dcc.Markdown("_Disclaimer: AI-generated; may contain inaccuracies._"),
-            ]
+        snapshot = blurb_async.get_snapshot(payload["run_id"])
+        if not snapshot:
+            raise PreventUpdate
+
+        order = ("forecast", "recommendation", "models", "recap")
+        outs: list = []
+        for sec in order:
+            text = snapshot.get(sec)
+            if text is None:
+                outs.append(html.Em(
+                    f"Generating {sec}…", className="pi-muted small"
+                ))
+            elif text == "":
+                outs.append(html.Em(
+                    "no panel context — re-run the forecast",
+                    className="pi-muted small",
+                ))
+            else:
+                outs.append(render_blurb(text))
+
+        completed = snapshot.get("completed", 0)
+        total = snapshot.get("total", len(order))
+        is_done = snapshot.get("status") == "done"
+        progress_msg = (
+            f"All {total} panel(s) ready."
+            if is_done
+            else f"Generated {completed} of {total} panel(s); generating next…"
+        )
+        return (*outs, progress_msg, is_done
         )
 
     # Chat lives in the global chat drawer now — registered in app.py.

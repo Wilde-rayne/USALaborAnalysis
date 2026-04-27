@@ -37,8 +37,10 @@ from utils.llm_utils import AI_FAILURE_MESSAGE, explain_view
 logger = logging.getLogger(__name__)
 
 
-#: Section order is fixed — the polling callback returns this many
-#: outputs in this exact order.
+#: LFP-tab section order. Kept as a public constant for back-compat
+#: even though every tab now passes its own section names through
+#: :func:`start_run`. Polling callbacks return outputs in their own
+#: hand-rolled order, so this is purely informational.
 PANEL_SECTIONS: tuple[str, ...] = ("forecast", "requirements", "trend", "recap")
 
 #: Drop runs older than this (seconds since they finished). Bounds
@@ -55,20 +57,24 @@ _run_state: dict[str, dict] = {}
 def start_run(view_states: Mapping[str, dict | None]) -> str:
     """
     Allocate a run, kick off a daemon thread to fill its blurbs, and
-    return the run id. ``view_states`` keys must be a subset of
-    :data:`PANEL_SECTIONS`; any missing section gets a ``None`` entry
-    (the polling layer renders a generic placeholder for those).
+    return the run id. ``view_states`` is a tab-defined mapping from
+    section name to the typed view_state dict for that section — the
+    runner uses the caller's keys, so each tab can name its panels
+    however it wants ("forecast"/"trend" for LFP, "stats"/"timeseries"
+    for EDA, etc.). A ``None`` value marks a section that has nothing
+    to render (the polling layer treats that as "no panel context").
     """
     run_id = uuid.uuid4().hex
-    initial: dict = {sec: None for sec in PANEL_SECTIONS}
+    sections = list(view_states.keys())
+    initial: dict = {sec: None for sec in sections}
     initial["status"] = "starting"
     initial["started_at"] = time.time()
     initial["done_at"] = None
     initial["completed"] = 0
-    initial["total"] = sum(1 for sec in PANEL_SECTIONS if view_states.get(sec))
+    initial["total"] = sum(1 for v in view_states.values() if v)
     # Snapshot the view_states so the thread can't see the caller's
     # later mutations and so JSON-cache keys are stable.
-    snapshot = {sec: view_states.get(sec) for sec in PANEL_SECTIONS}
+    snapshot = dict(view_states)
 
     with _state_lock:
         _run_state[run_id] = initial
@@ -103,8 +109,9 @@ def is_done(run_id: str) -> bool:
 def _fill_blurbs(run_id: str, view_states: Mapping[str, dict | None]) -> None:
     """Daemon thread body — fill panels sequentially, surface progress."""
     completed = 0
-    total = sum(1 for sec in PANEL_SECTIONS if view_states.get(sec))
-    for section in PANEL_SECTIONS:
+    sections = list(view_states.keys())
+    total = sum(1 for v in view_states.values() if v)
+    for section in sections:
         view_state = view_states.get(section)
         if not view_state:
             with _state_lock:
