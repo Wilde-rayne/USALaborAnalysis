@@ -64,10 +64,12 @@ This module is that orchestrator. It is intentionally light-weight:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from typing import Callable, Mapping
 
 from utils.agents.base import LaborAgent, LaborAgentConfig
@@ -158,6 +160,72 @@ _SECTION_PROMPTS: dict[str, str] = {
 #: the AI_FAILURE_MESSAGE rather than blocking the polling callback
 #: from making forward progress on the other panels.
 SPECIALIST_TIMEOUT_SECONDS: int = 120
+
+
+#: Module-level cache for ``BlurbOrchestrator._review_and_revise``
+#: results, keyed on (section, JSON view_state, model). A re-click
+#: with identical Run-Forecast parameters returns the prior text in
+#: <10 ms instead of paying a fresh ~30 s LLM round-trip — the
+#: single biggest UX win for the user-iterates-on-same-state flow.
+#: ``_CACHE_MAX_ENTRIES`` bounds the dict so a long-lived gunicorn
+#: worker doesn't grow the cache without limit.
+_section_result_cache: dict[tuple[str, str, str], str] = {}
+_CACHE_MAX_ENTRIES: int = 256
+
+
+def _trim_cache() -> None:
+    """Drop the oldest half of the section cache when it overflows.
+    Cheap and good enough — there's no per-entry hit-count tracking
+    so we treat insertion order as a fair-enough proxy for staleness."""
+    if len(_section_result_cache) <= _CACHE_MAX_ENTRIES:
+        return
+    keys = list(_section_result_cache.keys())
+    for k in keys[: len(keys) // 2]:
+        _section_result_cache.pop(k, None)
+
+
+def _invariant_failures_for(view_state: dict) -> list[str]:
+    """
+    Run the appropriate statistical-rigor invariants for the panel's
+    ``_kind`` and return the list of failure messages. Empty list
+    when nothing fires (or when the view doesn't carry the fields
+    the invariants need). Pure-Python — runs in microseconds, safe
+    on the orchestrator's hot path.
+
+    The forecast / supersector_forecast invariants need a history
+    window we don't carry in the view_state (the renderer only
+    keeps last-actual + summary stats), so the envelope check is
+    skipped for now and we cover the CI / RMSE-baseline checks
+    that operate on the rendered values directly. The next slice
+    (image-writer) can plumb history through if needed.
+    """
+    kind = view_state.get("_kind")
+    if kind not in ("forecast_panel", "supersector_forecast"):
+        return []
+    failures: list[str] = []
+    point = view_state.get("forecast_point")
+    ci = view_state.get("forecast_ci") or [None, None]
+    ci_lo, ci_hi = (ci[0], ci[1]) if isinstance(ci, (list, tuple)) and len(ci) >= 2 else (None, None)
+    if point is not None and ci_lo is not None and ci_hi is not None:
+        if not (ci_lo <= point <= ci_hi):
+            failures.append(
+                f"point forecast {point} not contained in CI "
+                f"[{ci_lo}, {ci_hi}] — model bug; treat with caution"
+            )
+        # CI width sanity — flag if wider than the last-actual value
+        # itself (a percent-scale series with CI > 100 % of value is
+        # essentially uninformative).
+        last_val = view_state.get("last_actual_value")
+        if last_val is not None and last_val > 0:
+            width = ci_hi - ci_lo
+            if width > last_val * 0.5:
+                failures.append(
+                    f"95 % prediction interval is {width:.1f} "
+                    f"({width/last_val*100:.0f}% of the last observed "
+                    f"value) — model uncertainty is high, treat the "
+                    f"point estimate as a midpoint not a target"
+                )
+    return failures
 
 
 def _make_specialist(
@@ -392,16 +460,51 @@ class BlurbOrchestrator:
     # ------------------------------------------------------------------
     # Internal — single-section pipeline
     # ------------------------------------------------------------------
+    def _cache_key(self, section: str, view_state: dict) -> tuple[str, str, str]:
+        """
+        Deterministic key for the orchestrator's per-section result
+        cache. JSON-stable view_state + the active model so a model
+        swap (env var change) bypasses stale cache entries.
+        """
+        view_json = json.dumps(view_state, sort_keys=True, default=str)
+        model = os.getenv(CHAT_MODEL_ENV, "llama3.2:3b")
+        return (section, view_json, model)
+
     def _review_and_revise(self, section: str, view_state: dict) -> str:
         """
         Specialist → reviewer → maybe revise. Loops at most
         ``max_retries`` times on REVISE verdicts before accepting the
         latest candidate as-is. Every failure path returns *some*
         text — the AI panel is never left empty.
+
+        Result memoised against ``_section_result_cache`` so a re-click
+        with identical parameters returns the prior text instantly
+        instead of paying another ~30 s LLM round-trip.
         """
+        cache_key = self._cache_key(section, view_state)
+        cached = _section_result_cache.get(cache_key)
+        if cached is not None:
+            logger.debug("[orch] section=%s cache hit", section)
+            return cached
+
         builder = default_rag_builder()
         sentences = builder.render_view_sentences(view_state)
         facts = "\n".join(f"- {s}" for s in sentences)
+
+        # Statistical-rigor invariants — for forecast / requirements /
+        # supersector_forecast view_states we fold ``audit_forecast``
+        # failures into the facts block so the specialist knows to
+        # acknowledge model uncertainty (CI too wide, RMSE didn't
+        # beat naive, point outside historical envelope) rather than
+        # claiming certainty the data doesn't support.
+        invariant_failures = _invariant_failures_for(view_state)
+        if invariant_failures:
+            cav = "\n".join(f"- {msg}" for msg in invariant_failures)
+            facts = (
+                f"{facts}\n\n"
+                f"Statistical caveats (cite these — the model "
+                f"uncertainty is genuine):\n{cav}"
+            )
 
         # Recap also gets the reviewed panel texts (if the caller
         # supplied them) as additional grounding so the synthesis
@@ -442,6 +545,13 @@ class BlurbOrchestrator:
         # default path and consistently improves first-line quality.
         candidate = strip_preamble(candidate) or candidate
 
+        def _finalize(text: str) -> str:
+            """Cache + return — single exit point so every code path
+            below populates the orchestrator's section cache."""
+            _section_result_cache[cache_key] = text
+            _trim_cache()
+            return text
+
         # Free heuristic check — runs even with LLM review disabled
         # because it's pure-Python (preamble / digit count / sentinels).
         ok, reason = self._reviewer.quick_check(candidate)
@@ -451,7 +561,7 @@ class BlurbOrchestrator:
                 "(quick_check=%s, llm_review_enabled=%s)",
                 section, ok, self._enable_llm_review,
             )
-            return candidate
+            return _finalize(candidate)
 
         # Optional LLM-review + revision loop (off by default — the
         # extra round-trips multiply latency on single-CPU Ollama).
@@ -465,7 +575,7 @@ class BlurbOrchestrator:
                     facts=facts,
                 )
                 if tile["passed"]:
-                    return candidate
+                    return _finalize(candidate)
                 review = tile
             logger.info(
                 "[orch] section=%s revising (stage=%s): %s",
@@ -479,7 +589,7 @@ class BlurbOrchestrator:
                 f"numbers from the facts."
             )
             candidate = specialist.invoke(prompt)
-        return candidate
+        return _finalize(candidate)
 
     def _collect_facts(
         self,

@@ -875,6 +875,68 @@ def register_callbacks(app):
             bgcolor="rgba(255, 255, 255, 0.65)",
         )
 
+        # ----- Image impact: reference lines for context -----
+        # Two horizontal reference lines that put the forecast in
+        # context at a glance: (a) the focus state's historical mean
+        # over the displayed window, (b) the peer-median forecast at
+        # the +horizon endpoint. Both help the user see whether the
+        # forecast is "back to normal" or "above peers" without
+        # reading the AI prose.
+        focus_history_arr = (
+            hist[focus_col].dropna().to_numpy()
+            if not hist.empty and focus_col in hist
+            else None
+        )
+        if focus_history_arr is not None and focus_history_arr.size >= 12:
+            hist_mean_value = float(np.mean(focus_history_arr))
+            fig.add_shape(
+                type="line", xref="paper", yref="y",
+                x0=0, x1=1, y0=hist_mean_value, y1=hist_mean_value,
+                line=dict(color="rgba(31, 119, 180, 0.45)", dash="dot", width=1),
+                layer="below",
+            )
+            fig.add_annotation(
+                xref="paper", yref="y",
+                x=0.99, y=hist_mean_value,
+                text=f"{focus_state} historical mean ({hist_mean_value:.1f}%)",
+                showarrow=False, xanchor="right", yanchor="bottom",
+                font=dict(size=10, color="rgba(31, 119, 180, 0.85)"),
+                bgcolor="rgba(255, 255, 255, 0.65)",
+            )
+        # Peer median line — only when there are peers and they have
+        # forecasts. We compute again here from the predicted points
+        # to keep the chart self-contained.
+        peer_point_values = []
+        for st in peer_states:
+            peer_col_for_med = _column_for(metric, st)
+            if peer_col_for_med not in df.columns:
+                continue
+            try:
+                p_result = state_forecasts.get(st)
+                if p_result is None:
+                    continue
+                p_preds = p_result.model.predict(total_horizon)
+                if len(p_preds) > 0:
+                    peer_point_values.append(float(p_preds[-1]))
+            except Exception:  # noqa: BLE001 — chart annotation, never block render
+                continue
+        if peer_point_values:
+            peer_median_value = float(np.median(peer_point_values))
+            fig.add_shape(
+                type="line", xref="paper", yref="y",
+                x0=0.0, x1=1, y0=peer_median_value, y1=peer_median_value,
+                line=dict(color="rgba(214, 39, 40, 0.45)", dash="dash", width=1),
+                layer="below",
+            )
+            fig.add_annotation(
+                xref="paper", yref="y",
+                x=0.01, y=peer_median_value,
+                text=f"peer median forecast ({peer_median_value:.1f}%)",
+                showarrow=False, xanchor="left", yanchor="bottom",
+                font=dict(size=10, color="rgba(214, 39, 40, 0.85)"),
+                bgcolor="rgba(255, 255, 255, 0.65)",
+            )
+
         # Trend summary across every state in scope.
         summaries: dict[str, TrendSummary | None] = {}
         for st in all_states:
@@ -917,6 +979,25 @@ def register_callbacks(app):
         )
         focus_points = forecast_points.get(focus_state) or {}
 
+        # Statistical context for the AI prompt: focus state's
+        # historical mean + volatility (σ) over the full window, plus
+        # the median of peer states' point forecasts. These give the
+        # specialist something to compare against ("forecast is X pp
+        # above the historical mean of Y, vs peer median of Z") so
+        # the prose includes interpretation rather than restatement.
+        focus_history = hist[focus_col].dropna().to_numpy() if not hist.empty else np.array([])
+        if focus_history.size >= 12:
+            historical_mean = float(np.mean(focus_history))
+            historical_std = float(np.std(focus_history, ddof=1))
+        else:
+            historical_mean = historical_std = None
+        peer_points = [
+            forecast_points[p]["point"]
+            for p in peer_states
+            if forecast_points.get(p) is not None
+        ]
+        peer_median = float(np.median(peer_points)) if peer_points else None
+
         forecast_view = {
             "_kind": "forecast_panel",
             "title": f"{focus_state} {metric_label} forecast (starts {gap_anchor.year})",
@@ -937,6 +1018,10 @@ def register_callbacks(app):
             ),
             "winning_model": focus_result.name,
             "rmse": _round2(focus_result.metrics.rmse),
+            # Statistical context for the AI specialist
+            "historical_mean": _round2(historical_mean),
+            "historical_volatility": _round2(historical_std),
+            "peer_median_forecast": _round2(peer_median),
         }
 
         passing, failing = _classify_requirements(

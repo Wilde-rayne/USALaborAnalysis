@@ -396,6 +396,32 @@ class SentenceRAGBuilder:
                 f"Peer states under comparison: {', '.join(peer_labels)}"
                 + (f" ({region_hint})." if region_hint else ".")
             )
+        # Statistical context — gives the AI specific numbers to
+        # interpret against rather than just restating the forecast.
+        hist_mean = vs.get("historical_mean")
+        hist_vol = vs.get("historical_volatility")
+        peer_median = vs.get("peer_median_forecast")
+        if hist_mean is not None and hist_vol is not None:
+            sentences.append(
+                f"Historical context: the {focus} {measure} averaged "
+                f"{self._fmt_pct_or_num(hist_mean, vs)} across the "
+                f"observed window with σ "
+                f"{self._fmt_pct_or_num(hist_vol, vs)}; deviations "
+                f"larger than ~2σ are noteworthy."
+            )
+        if peer_median is not None and forecast is not None:
+            delta = forecast - peer_median
+            direction_word = (
+                "above" if delta > 0
+                else "below" if delta < 0
+                else "in line with"
+            )
+            sentences.append(
+                f"Peer-state median forecast at the same horizon is "
+                f"{self._fmt_pct_or_num(peer_median, vs)}; {focus}'s "
+                f"point estimate is {direction_word} the peer median "
+                f"by {self._fmt_pct_or_num(abs(delta), vs)}."
+            )
         return sentences
 
     def _render_requirements_panel(self, vs: dict) -> list[str]:
