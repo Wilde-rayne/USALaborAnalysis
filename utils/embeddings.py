@@ -147,6 +147,26 @@ def _tokenize_for_overlap(text: str) -> set[str]:
     return {t for t in clean if any(c.isalnum() for c in t)}
 
 
+def _apply_e5_prefix(role: str, text: str) -> str:
+    """
+    Prepend the e5-required role prefix to ``text``.
+
+    ``intfloat/e5-small-v2`` (and the rest of the e5 family) is trained
+    with an asymmetric retrieval objective: corpus chunks carry a
+    ``"passage: "`` prefix and queries carry a ``"query: "`` prefix.
+    Skipping the prefix degrades retrieval by 5-15 % per the model card
+    (https://huggingface.co/intfloat/e5-small-v2).
+
+    No-ops for any non-e5 model (e.g. ``all-MiniLM-L6-v2``) so the
+    helper is safe to call unconditionally.
+    """
+    if role not in ("query", "passage"):
+        raise ValueError(f"role must be 'query' or 'passage', got {role!r}")
+    if not LOCAL_EMBED_MODEL.startswith("e5"):
+        return text
+    return f"{role}: {text}"
+
+
 def _file_hash(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -155,20 +175,31 @@ def _file_hash(path: str) -> str:
     return h.hexdigest()
 
 
+#: Version marker mixed into the embedding cache key. Bump this any
+#: time the corpus-encoding contract changes (e.g. prefix logic, chunk
+#: normalization) so old caches don't load with a now-incompatible
+#: model invocation. ``v2`` introduced the ``passage:``/``query:`` e5
+#: prefix application — see ``_apply_e5_prefix``.
+_EMBED_CACHE_VERSION = "v2-e5prefix"
+
+
 def _combined_input_hash(paths: Sequence[str]) -> str:
     """
     Deterministic key over existing inputs — drives cache invalidation.
 
-    The active embedding model name is mixed in so that switching
-    ``LOCAL_EMBED_MODEL`` (e.g. e5-small-v2 → all-MiniLM-L6-v2) cannot
-    re-use stale vectors from a different model that happen to have the
-    same dimensionality.
+    The active embedding model name AND the corpus-encoding contract
+    version are mixed in so that switching ``LOCAL_EMBED_MODEL`` (e.g.
+    e5-small-v2 → all-MiniLM-L6-v2) or rotating the prefix logic
+    cannot re-use stale vectors from a different setup that happen to
+    have the same dimensionality.
     """
     h = hashlib.sha256()
     # Bind the cache to the model that produced it. Without this guard
     # a model swap leaves vectors that look fresh and load silently.
     h.update(b"model=")
     h.update(LOCAL_EMBED_MODEL.encode("utf-8"))
+    h.update(b"\nversion=")
+    h.update(_EMBED_CACHE_VERSION.encode("utf-8"))
     h.update(b"\n")
     for p in paths:
         if os.path.exists(p):
@@ -231,12 +262,19 @@ def _collect_chunks() -> List[str]:
     return [c for c in chunks if c and c.strip()]
 
 
-def _embed_texts(texts: Sequence[str]) -> np.ndarray:
-    """Encode ``texts`` into a (N, dim) float32 array with L2-normalized rows."""
+def _embed_texts(texts: Sequence[str], role: str = "passage") -> np.ndarray:
+    """
+    Encode ``texts`` into a (N, dim) float32 array with L2-normalized rows.
+
+    ``role`` is the e5 prefix role — ``"passage"`` for corpus chunks
+    (default) or ``"query"`` for a search-time embed call. The prefix
+    is no-op for non-e5 backends.
+    """
     model = _get_st_model()
+    prefixed = [_apply_e5_prefix(role, t) for t in texts]
     with torch.inference_mode():
         raw = model.encode(
-            list(texts),
+            prefixed,
             batch_size=BATCH_SIZE,
             normalize_embeddings=True,
             show_progress_bar=False,
@@ -249,6 +287,18 @@ def _embed_texts(texts: Sequence[str]) -> np.ndarray:
     return arr / norms
 
 
+def _embed_query(text: str) -> np.ndarray:
+    """
+    Encode a single query string into a (dim,) float32 vector.
+
+    Always applies the ``"query: "`` prefix (no-op for non-e5 models)
+    and L2-normalizes the result so downstream cosine reduces to a dot
+    product against the L2-normalized corpus matrix.
+    """
+    arr = _embed_texts([text], role="query")
+    return arr[0]
+
+
 # --------------------------------------------------------------------------
 # Public API
 # --------------------------------------------------------------------------
@@ -257,10 +307,10 @@ def load_embeddings() -> tuple[List[str], np.ndarray]:
     Build (or load from cache) the RAG chunk corpus + embeddings.
 
     Mutates module globals ``_chunks``, ``_embs``, ``_chunk_tokens``.
-    The embeddings are retained on disk so future semantic-rerank
-    callers can use them, but the default retrieval path
-    (``retrieve_context``) is token-overlap based — see that function
-    for the "why".
+    Both the corpus matrix and the lexical-overlap token sets are kept;
+    ``retrieve_context`` defaults to cosine similarity against ``_embs``
+    and only falls back to the token-overlap path when
+    ``USE_LEXICAL_RETRIEVAL`` is set or the embedding matrix is empty.
     """
     global _chunks, _embs, _chunk_tokens
 
@@ -327,35 +377,32 @@ def load_embeddings() -> tuple[List[str], np.ndarray]:
     return _chunks, _embs
 
 
-def retrieve_context(query: str, top_k: int = 3, return_scores: bool = False):
+def _use_lexical_retrieval() -> bool:
     """
-    Pick top-k relevant chunks via tokenizer-based lexical overlap.
+    True if the caller has opted *in* to the lexical-Jaccard fallback.
 
-    NOTE: a previous version cosine-matched the query against the stored
-    SentenceTransformer embeddings. That path crashed with
-    ``free(): invalid pointer`` whenever a Gunicorn worker had already
-    trained an LSTM (via tensorflow) earlier in the same request —
-    torch-vs-tensorflow native allocator contention. The fallback here
-    uses only the tokenizer (no torch at query time) and still gives
-    reasonable results on a 1.8k-chunk corpus; we can swap back to
-    semantic retrieval once the workers move to a process-based
-    worker class or the TF/torch coexistence is fixed.
+    The old code path was disabled because torch-vs-tensorflow native
+    allocator contention crashed Gunicorn workers that had also trained
+    an LSTM earlier in the same request. With the rest of the pipeline
+    moving off TensorFlow (LSTM is opt-in, not the default) cosine is
+    safe again — but keep an env-gate escape hatch for the deployments
+    that still mix TF + torch in one process.
     """
-    q = query.strip()
-    if not q:
-        raise ValueError("Cannot embed empty query.")
+    return os.environ.get("USE_LEXICAL_RETRIEVAL", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
-    if _chunk_tokens is None:
-        load_embeddings()
-    if not _chunks or not _chunk_tokens:
-        return [] if return_scores else ""
 
-    q_tokens = _tokenize_for_overlap(q)
+def _retrieve_lexical(
+    query: str, top_k: int, return_scores: bool
+):
+    """Tokenizer-Jaccard fallback. Used when cosine is disabled or unavailable."""
+    q_tokens = _tokenize_for_overlap(query)
     if not q_tokens:
         return [] if return_scores else ""
 
     scores: list[tuple[int, float]] = []
-    for i, ctoks in enumerate(_chunk_tokens):
+    for i, ctoks in enumerate(_chunk_tokens or []):
         if not ctoks:
             continue
         overlap = len(q_tokens & ctoks)
@@ -371,6 +418,66 @@ def retrieve_context(query: str, top_k: int = 3, return_scores: bool = False):
 
     if return_scores:
         return [(_chunks[i], float(s)) for i, s in top]
+    return "\n\n".join(_chunks[i] for i, _ in top)
+
+
+def retrieve_context(query: str, top_k: int = 3, return_scores: bool = False):
+    """
+    Pick top-k relevant chunks via cosine similarity over the cached
+    SentenceTransformer embeddings.
+
+    The query is prefixed with ``"query: "`` per the e5 model card and
+    embedded once, then cosine-scored against the L2-normalized
+    ``_embs`` matrix (cosine reduces to a dot product on normalized
+    inputs). Falls back to tokenizer-Jaccard scoring when:
+
+    - ``USE_LEXICAL_RETRIEVAL`` env var is truthy (manual escape hatch
+      for deployments where torch + tensorflow share a Gunicorn worker
+      and the native allocators fight — see history of this function);
+    - ``_embs`` is missing or empty (e.g. ``load_embeddings`` returned
+      no chunks);
+    - the cosine path raises (defensive — RAG is best-effort).
+    """
+    q = query.strip()
+    if not q:
+        raise ValueError("Cannot embed empty query.")
+
+    if _chunk_tokens is None or _embs is None:
+        load_embeddings()
+    if not _chunks:
+        return [] if return_scores else ""
+
+    use_lexical = (
+        _use_lexical_retrieval()
+        or _embs is None
+        or _embs.size == 0
+    )
+    if use_lexical:
+        return _retrieve_lexical(q, top_k=top_k, return_scores=return_scores)
+
+    try:
+        q_vec = _embed_query(q)
+        # _embs rows are L2-normalized (see _embed_texts); q_vec is too.
+        # Cosine = dot product on normalized vectors.
+        sims = _embs @ q_vec
+        # argsort descending; cap at top_k.
+        n = min(top_k, sims.shape[0])
+        if n <= 0:
+            return [] if return_scores else ""
+        # argpartition is O(n) for the top-k slice; full sort only the
+        # k-element shortlist.
+        idx_part = np.argpartition(-sims, n - 1)[:n]
+        idx_sorted = idx_part[np.argsort(-sims[idx_part])]
+        top = [(int(i), float(sims[i])) for i in idx_sorted]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"[EMB] cosine retrieval failed ({type(exc).__name__}: {exc}); "
+            "falling back to lexical"
+        )
+        return _retrieve_lexical(q, top_k=top_k, return_scores=return_scores)
+
+    if return_scores:
+        return [(_chunks[i], s) for i, s in top]
     return "\n\n".join(_chunks[i] for i, _ in top)
 
 

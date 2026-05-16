@@ -29,9 +29,14 @@ def test_state_list_shape() -> None:
 
 def test_supersector_list_matches_bls_taxonomy() -> None:
     from utils import constants
+    from utils.ontology import SUPERSECTORS as ONT_SUPERSECTORS
 
-    # BLS CES publishes 9 supersectors at the state level (NAICS roll-up).
-    assert len(constants.SUPERSECTORS) == 9
+    # SUPERSECTORS is derived from the ontology to eliminate drift
+    # between the JSON, the fetcher, and the UI dropdown. The ontology
+    # currently carries 13 BLS state supersectors (Total_Nonfarm,
+    # Total_Private, 9 NAICS roll-ups, Leisure_Hospitality,
+    # Other_Services, Government).
+    assert constants.SUPERSECTORS == [s.key for s in ONT_SUPERSECTORS]
     # Canonical names include Manufacturing and Government.
     assert "Manufacturing" in constants.SUPERSECTORS
     assert "Government" in constants.SUPERSECTORS

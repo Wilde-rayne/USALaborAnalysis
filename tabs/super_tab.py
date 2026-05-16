@@ -483,23 +483,29 @@ def register_callbacks(app):
                 "rmse":     result.metrics.rmse,
             }
 
-        # Aggregate reference rows (always shown; don't get filtered by
-        # region — they're descriptive for whatever set is on-screen).
-        vals = np.array([s["value"] for s in state_summary.values()], dtype=float)
+        # Threshold filter — applied to per-state forecasts before the
+        # aggregate reference rows are computed, so "Region Mean" and
+        # "Region Median" summarize the set the user can actually see
+        # in the chart. See combined-review.md Track B row 5.
+        display_states = _sort_states(state_summary, sort_mode)
+        flat_forecasts = {c: state_summary[c]["value"] for c in display_states}
+        flat_forecasts = _apply_threshold(flat_forecasts, threshold)
+        # Rebuild ordered state list after threshold.
+        display_states = [c for c in display_states if c in flat_forecasts]
+
+        # Aggregate reference rows are computed on the post-filter set
+        # so the labels in the chart legend match the numerical content.
+        vals = np.array(
+            [state_summary[c]["value"] for c in display_states], dtype=float
+        )
         mean_val = float(vals.mean()) if vals.size else 0.0
         median_val = float(np.median(vals)) if vals.size else 0.0
 
-        # Threshold filter — applied after growth etc. are computed so
-        # the recommendation panel can still see the full set.
-        display_states = _sort_states(state_summary, sort_mode)
-        flat_forecasts = {c: state_summary[c]["value"] for c in display_states}
+        # Re-attach the aggregate rows to the flat-forecast dict for
+        # downstream consumers (recommendation panel + view payload).
         flat_forecasts["Region Mean"] = mean_val
         flat_forecasts["Region Median"] = median_val
         all_forecasts = dict(flat_forecasts)
-        flat_forecasts = _apply_threshold(flat_forecasts, threshold)
-
-        # Rebuild ordered state list after threshold.
-        display_states = [c for c in display_states if c in flat_forecasts]
 
         # Plotly bars + error bars for 95% CI.
         labels = display_states + ["Region Mean", "Region Median"]
@@ -592,9 +598,11 @@ def register_callbacks(app):
             "region_median": round(median_val, 1),
         }
 
-        # Top / bottom relative to median for the recommendation view.
+        # Top / bottom relative to median for the recommendation view —
+        # restricted to the post-threshold display_states so the panel
+        # matches what the chart shows.
         sorted_by_value = sorted(
-            ((c, state_summary[c]["value"]) for c in state_summary),
+            ((c, state_summary[c]["value"]) for c in display_states),
             key=lambda kv: kv[1],
             reverse=True,
         )

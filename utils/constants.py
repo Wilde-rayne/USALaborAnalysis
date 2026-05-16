@@ -34,7 +34,12 @@ DEFAULT_TIMEOUT  = get_env("OLLAMA_TIMEOUT", 600, int)
 BLS_API_KEY    = os.getenv("BLS_API_KEY") or None
 CENSUS_API_KEY = os.getenv("CENSUS_API_KEY") or None
 API_KEY        = BLS_API_KEY  # backward-compat alias used by fetch_ces/laus
-OUTPUT_JSON = "data/all_data.json"
+#: Absolute path to the merged data file. Anchored at the repo root
+#: (``utils/`` → ``parents[1]``) so importing from any process CWD
+#: still resolves to the same file. Mirrored in ``utils.data_pipeline``;
+#: callers should treat this as the source of truth.
+from pathlib import Path as _Path  # noqa: PLC0415 — kept local to this constant
+OUTPUT_JSON = str(_Path(__file__).resolve().parents[1] / "data" / "all_data.json")
 
 LOCAL_EMBED_MODEL = "e5-small-v2"
 
@@ -85,17 +90,20 @@ MONTH_MAP = {
     "A01": "Annual"
 }
 
-SUPERSECTORS = [
-    "Mining_and_Logging",
-    "Construction",
-    "Manufacturing",
-    "Trade_Transportation_Utilities",
-    "Information",
-    "Financial_Activities",
-    "Professional_Business_Services",
-    "Education_Health_Services",
-    "Government"
-]
+#: Supersector key list for the UI dropdown. Derived from the ontology
+#: (which already mirrors the BLS CES JSON) so the UI cannot drift from
+#: the fetcher / merger. The ontology lists 13 supersectors at the
+#: state level: Total_Nonfarm, Total_Private, the nine NAICS roll-ups,
+#: Leisure_Hospitality, Other_Services, and Government. All are
+#: fetched by the CES pipeline and become reachable from the dropdown
+#: as soon as the panel includes the matching ``{ST}_{sector}`` column.
+def _resolve_supersectors() -> list[str]:
+    from utils.ontology import SUPERSECTORS as _ONT_SS  # noqa: PLC0415
+
+    return [s.key for s in _ONT_SS]
+
+
+SUPERSECTORS = _resolve_supersectors()
 
 README_PATH    = os.path.join(os.path.dirname(__file__), os.pardir, "README.md")
 REPORT_PATH    = os.path.join(os.path.dirname(__file__), os.pardir, "REPORT.md")

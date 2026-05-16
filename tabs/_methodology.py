@@ -20,6 +20,12 @@ from typing import Iterable
 from dash import html
 
 from utils.citations import CITATIONS, citation, render_inline
+from utils.forecasting.models import ARIMAForecaster
+
+
+def _format_arima_grid(grid: tuple[tuple[int, int, int], ...]) -> str:
+    """Render ``((1,1,1), (2,1,1), ...)`` as ``{(1,1,1), (2,1,1), ...}``."""
+    return "{" + ", ".join(f"({p},{d},{q})" for (p, d, q) in grid) + "}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,8 +54,11 @@ FORECAST_NOTES: tuple[MethodologyNote, ...] = (
         cites=("holt_1957", "winters_1960", "hyndman_athanasopoulos_2018"),
     ),
     MethodologyNote(
-        "ARIMA orders are AIC-selected from a small grid "
-        "{(1,1,1), (2,1,1), (1,1,2), (2,1,2)}.",
+        # Rendered from ARIMAForecaster.DEFAULT_GRID at module load so
+        # editing the grid in the model class flows through to the
+        # methodology panel automatically — no second source of truth.
+        f"ARIMA orders are AIC-selected from a small grid "
+        f"{_format_arima_grid(ARIMAForecaster.DEFAULT_GRID)}.",
         cites=("box_jenkins_1970",),
     ),
     MethodologyNote(

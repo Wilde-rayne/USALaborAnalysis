@@ -24,8 +24,12 @@ from .merge_all_data import merge_all_data, save_data
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_JSON = "data/all_data.json"
-OUTPUT_CSV  = "data/all_data.csv"
+#: Absolute paths to the merged-panel outputs. Resolved at module load
+#: relative to the repo root (``parents[1]`` from ``utils/``) so that
+#: importing ``utils.data_pipeline`` from any directory writes to the
+#: same single canonical location instead of a per-CWD ``data/`` folder.
+OUTPUT_JSON = Path(__file__).resolve().parents[1] / "data" / "all_data.json"
+OUTPUT_CSV  = Path(__file__).resolve().parents[1] / "data" / "all_data.csv"
 
 
 def load_panel_df(json_path: str | None = None) -> pd.DataFrame:
@@ -96,7 +100,7 @@ def ensure_data(
     if not force and cache_is_fresh(OUTPUT_JSON):
         age_h = (time.time() - os.path.getmtime(OUTPUT_JSON)) / 3600
         logger.info(f"[PIPE] Cache hit: {OUTPUT_JSON} (age {age_h:.1f}h)")
-        return OUTPUT_JSON
+        return str(OUTPUT_JSON)
 
     Path(OUTPUT_JSON).parent.mkdir(parents=True, exist_ok=True)
     logger.info(
@@ -116,7 +120,7 @@ def ensure_data(
     except Exception:  # noqa: BLE001
         pass
 
-    return OUTPUT_JSON
+    return str(OUTPUT_JSON)
 
 def refresh_all(states: list[str], start_year: int, end_year: int):
     """
