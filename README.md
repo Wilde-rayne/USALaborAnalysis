@@ -1,6 +1,10 @@
-# Prairie Insights: Midwest Labor Dashboard
+# Prairie Insights: U.S. Labor Market Dashboard
 
-An interactive dashboard analyzing labor and employment trends in Iowa and the broader Midwest, leveraging BLS data (CES & LAUS), machine learning forecasts, and AI‐generated narratives.
+An interactive dashboard analyzing labor and employment trends across all 51
+U.S. jurisdictions (50 states + DC), leveraging BLS data (CES, LAUS, JOLTS,
+QCEW, CPI), Census ACS/PEP, BEA, and FRED, alongside multi-model forecasts
+and AI-generated narratives. Iowa and the broader Midwest serve as the
+default narrative entry point but the panel and tabs cover the full country.
 
 ---
 
@@ -13,10 +17,18 @@ An interactive dashboard analyzing labor and employment trends in Iowa and the b
   - **BEA** — state annual personal income (SAINC1)
   - **FRED** — state macro indicators (UR, PI, NGSP, …) via `{ST}{IND}` naming
 - **Forecasting — multi-model bakeoff, not a single architecture**
-  - Candidate set: Naive, Seasonal-Naive, Holt-Winters ETS (LSTM opt-in)
-  - Expanding-window backtest picks the lowest-RMSE model per series
+  - Always-on candidate set: Naive, Seasonal-Naive, Holt-Winters ETS,
+    and ARIMA (with an AIC-selected order grid). LSTM is available as an
+    opt-in fifth candidate but is *not* the production default.
+  - An expanding-window backtest fits each candidate on the leading
+    window and scores it on the held-out fold; the per-series winner is
+    selected by minimum out-of-sample RMSE (see
+    `utils/forecasting/selection.py`).
+  - 95 % prediction intervals come from each model's native variance
+    (`get_forecast` for ETS / ARIMA) or a residual-bootstrap band for the
+    baselines.
   - Per-forecast diagnostics: ADF / KPSS / Ljung-Box / Jarque-Bera /
-    Diebold-Mariano (with HLN small-sample correction) vs. Naive baseline
+    Diebold-Mariano (with HLN small-sample correction) vs. Naive baseline.
 - **LLM layer — LangChain + Ollama**
   - Chat / blurbs: `llama3.2:3b` via `ChatOllama`
   - Background agents: `phi3` via `deepagents.create_deep_agent`
@@ -194,14 +206,20 @@ Any changes in `./` will trigger Gunicorn’s `--reload` and Spark/embeddings wi
 
 ## 📄 About This Dashboard
 
-This dashboard provides clear, actionable insights into labor trends in the Midwest, leveraging BLS data (CES & LAUS), machine learning forecasts, and AI-generated narratives.
+This dashboard provides clear, actionable insights into U.S. labor-market
+trends across all 51 jurisdictions (50 states + DC), leveraging BLS data
+(CES, LAUS, JOLTS, QCEW, CPI), Census ACS/PEP, BEA, and FRED, alongside
+multi-model forecasts and AI-generated narratives. Iowa and Midwest peer
+comparisons are featured as recurring examples in the LFP and Super tabs.
 
 **Purpose & Audience**  
 Enable exploration of historical employment/unemployment metrics and forecast future trends at state and sector levels. Targeted at new graduates, policymakers, and labor analysts.
 
 **Data & Models**  
-- **Data**: CES = industry counts; LAUS = unemployment & LFPR  
-- **Forecast**: LSTM RNN with 12-month windows  
+- **Data**: CES = industry counts; LAUS = unemployment & LFPR; JOLTS,
+  QCEW, CPI, Census ACS/PEP, BEA personal income, FRED state macro
+- **Forecast**: per-series bakeoff across Naive, Seasonal-Naive,
+  Holt-Winters ETS, and ARIMA (LSTM available behind an opt-in flag)
 - **AI Insights**: Local LLMs via Ollama — `llama3.2:3b` for chat, `phi3` for the DeepAgents harness  
 
 **Project & Team**  

@@ -1,5 +1,9 @@
 ## Team Formation (2497455):
-The team, Prairie Insights, was formed by considering regional significance and thematic relevance to actionable insights on labor market dynamics. The name "Prairie Insights" symbolizes clarity, directness, and focus on the Midwest prairie states, central to our analyses. Team Members include Rayne Wilde.
+Prairie Insights is a sole-author team (Rayne Wilde), formed by
+considering regional significance and thematic relevance to actionable
+insights on labor market dynamics. The name "Prairie Insights"
+symbolizes clarity, directness, and focus on the Midwest prairie states
+that anchor the project's recurring case studies.
 
 ## 2025-02-17: Acquire Data Milestone
 
