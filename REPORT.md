@@ -1,15 +1,15 @@
-# Midwest Labor-Market Dashboard – Technical Report
+# USA Labor Dashboard – Technical Report
 
 *DS 4010 (2025) • Author – Rayne Wilde (rayne.k.wilde@gmail.com)*
 
 **Abstract.**
-We present an end-to-end solution for ingesting, cleaning, modeling, and visualizing U.S. labor-market data for Iowa and eleven peer Midwestern states. Our pipeline leverages BLS APIs and a modular Python codebase to produce a compact Parquet/JSON dataset. The forecasting layer runs a multi-model bakeoff (Naive / Seasonal-Naive / Holt-Winters ETS / ARIMA with an opt-in LSTM) and picks per-series winners by out-of-sample RMSE; a Dash/Plotly web app surfaces the forecasts, residual diagnostics, and AI-written narrative summaries to policy makers and students. The chat and blurb layer is **built with Llama** — Meta's Llama 3.2 (3B) running locally via Ollama under the [Llama 3.2 Community License](https://www.llama.com/llama3_2/license/).
+We present an end-to-end solution for ingesting, cleaning, modeling, and visualizing U.S. labor-market data across all 51 jurisdictions (50 states plus DC), with Iowa and its Midwestern peers featured as recurring narrative examples. Our pipeline leverages BLS APIs and a modular Python codebase to produce a compact Parquet/JSON dataset. The forecasting layer runs a multi-model bakeoff (Naive / Seasonal-Naive / Holt-Winters ETS / ARIMA with an opt-in LSTM) and picks per-series winners by out-of-sample RMSE; a Dash/Plotly web app surfaces the forecasts, residual diagnostics, and AI-written narrative summaries to policy makers and students. The chat and blurb layer is **built with Llama** — Meta's Llama 3.2 (3B) running locally via Ollama under the [Llama 3.2 Community License](https://www.llama.com/llama3_2/license/).
 
 ---
 
 ## 1  Project Goal & Audience  
 
-Our goal is to deliver a transparent, reproducible **Midwest Labor-Market Dashboard** that transforms raw Bureau of Labor Statistics (BLS) data into actionable forecasts and visualizations. By packaging all ETL, modeling, and frontend code in Docker containers, we empower policy makers seeking near-term labor-market projections, regional planners comparing state performance and sectoral drivers, and DS 4010 students as a teaching example of full-stack data science.
+Our goal is to deliver a transparent, reproducible **USA Labor Dashboard** that transforms raw Bureau of Labor Statistics (BLS), Census, BEA, and FRED data into actionable forecasts and visualizations spanning all 51 U.S. jurisdictions. Iowa and the broader Midwest are foregrounded as recurring case studies in the LFP and Super tabs. By packaging all ETL, modeling, and frontend code in Docker containers, we empower policy makers seeking near-term labor-market projections, regional planners comparing state performance and sectoral drivers, and DS 4010 students as a teaching example of full-stack data science.
 
 ---
 
@@ -87,28 +87,14 @@ model.compile(optimizer='adam', loss='mse')
 model.fit(X_train, y_train, epochs=50, batch_size=32)
 ```
 
-LSTM achieves MAE ~ 0.35 percentage points versus ARIMA’s 0.41 pp.
+LSTM and ARIMA were compared on a held-out period; in our internal benchmark LSTM showed a slight MAE advantage on the LFPR series, but this remains an open empirical question pending rigorous rolling-origin cross-validation. The current production stack uses fold-level RMSE on an expanding-window backtest to select the per-series winner (see `utils/forecasting/selection.py`); no canonical MAE comparison has been saved to the repo, and the specific magnitude is therefore not cited here.
 
 ### 3.2  Sectoral Employment  
 
 We train the same LSTM architecture separately for each BLS super-sector.
-
-### 3.3  Historical Analogues  
-
-```python
-import numpy as np
-from sklearn.preprocessing import StandardScaler
-
-def closest_month(target, history):
-    data = np.vstack([target, history])
-    scaled = StandardScaler().fit_transform(data)
-    sims = scaled[1:] @ scaled[0] / (
-        np.linalg.norm(scaled[1:], axis=1) * np.linalg.norm(scaled[0])
-    )
-    return history[np.argmax(sims)]
-```
-
-Analogues provide interpretable context.
+Historical-analogue analysis (matching a target month to its closest
+historical analogue under a scaled-cosine similarity) is on the
+Phase 2+ roadmap; no implementation is shipped in this build.
 
 ---
 
@@ -145,7 +131,7 @@ to reproduce against the bundled panel.)
 
 ## 5  Application & Discussion  
 
-**Question:** _How do Iowa’s labor-market dynamics align with the Midwestern average?_ Iowa’s LFPR remains within ±0.8 pp of the region since 2010. Sector analysis shows construction led early 2020s recovery.
+**Question:** _How do Iowa’s labor-market dynamics align with the Midwestern average?_ Iowa's LFPR tracks the regional aggregate closely throughout the 2010s, with visible co-movement during the 2020 shock and subsequent recovery; precise gap magnitudes are deferred to the validation work planned for Phase 2. Sector analysis shows construction led early 2020s recovery.
 
 ---
 
