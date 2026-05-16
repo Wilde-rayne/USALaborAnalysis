@@ -10,7 +10,25 @@ logger = logging.getLogger(__name__)
 # directories and constants
 RAW_DIR_LAUS = "data/raw/laus"
 RAW_DIR_CES  = "data/raw/ces"
+RAW_DIR_QCEW = "data/raw/qcew"
+RAW_DIR_JOLTS = "data/raw/jolts"
+RAW_DIR_CPI  = "data/raw/cpi"
+RAW_DIR_FRED = "data/raw/fred"
+RAW_DIR_BEA  = "data/raw/bea"
 CES_JSON     = "data/ces_state_sms_codes.json"
+
+# Map ONTOLOGY region label → BLS CPI region code. Used to broadcast
+# regional CPI rows back to the per-state panel so each state inherits
+# the index of its Census region.
+_REGION_TO_CPI_AREA: dict[str, str] = {
+    "Northeast": "0100",
+    "Midwest":   "0200",
+    "South":     "0300",
+    "West":      "0400",
+    # Territories + DC get the US city average as a best-effort proxy.
+    "Caribbean": "0000",
+    "Pacific":   "0000",
+}
 
 #: US-wide civilian noninstitutional population aged 16+ as a share of
 #: total resident population, per BLS Handbook of Methods (ch. 1).
@@ -21,10 +39,16 @@ LFPR_WORKING_AGE_FRACTION: float = 0.78
 
 def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
     """
-    Read LAUS series files and return DataFrame with 
-    (state, year, month, Labor_Force, Employment, Unemployment, Population).
+    Read LAUS series files and return DataFrame with
+    (state, year, month, Labor_Force, Employment, Unemployment).
+
+    Population is NOT a LAUS state-level measure (the BLS LAUS suffix
+    009 is not published per-state); it comes from Census PEP/ACS via
+    :mod:`utils.fetch_population_data` and is joined separately by
+    :func:`merge_all_data` below.
     """
-    measure_map = {"006": "Labor_Force", "005": "Employment", "004": "Unemployment", "009": "Population"}
+    # population comes from Census PEP/ACS via fetch_population_data.py
+    measure_map = {"006": "Labor_Force", "005": "Employment", "004": "Unemployment"}
 
     df_all = pd.DataFrame()
     for fn in os.listdir(RAW_DIR_LAUS):
@@ -153,6 +177,366 @@ def read_working_age_population(states: list, start: int, end: int) -> pd.DataFr
             )
         )
     return pd.concat(out_frames, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase E/F readers — pull QCEW / JOLTS / CPI / FRED / BEA into the panel.
+# Each helper returns a long-format DataFrame with at least
+# (year, month) plus one or more metric columns; per-state files also
+# carry a ``state`` column. The merger broadcasts national-only and
+# annual-only series across the requested grid so downstream consumers
+# can still join on (state, year, month) without missing rows.
+# ---------------------------------------------------------------------------
+def _broadcast_quarter_to_months(period: str) -> list[int]:
+    """``Q01`` → [1,2,3]; ``Q02`` → [4,5,6]; etc. Returns ``[]`` on bad input."""
+    if not period or not period.startswith("Q"):
+        return []
+    try:
+        q = int(period[1:])
+    except ValueError:
+        return []
+    if q < 1 or q > 4:
+        return []
+    base = (q - 1) * 3 + 1
+    return [base, base + 1, base + 2]
+
+
+def read_qcew(states: list, start: int, end: int) -> pd.DataFrame:
+    """
+    Read QCEW state-total files into a long DataFrame.
+
+    File layout (per :mod:`utils.fetch_qcew_data`):
+        ``data/raw/qcew/QCEW_{ST}_{SUFFIX}.txt``
+        with ``SUFFIX`` in {EMP, TQW, AWW, EST} and period ``QNN``.
+
+    Returns columns ``(state, year, month, metric, value)`` where the
+    quarterly value is broadcast forward into each of the three months
+    of the quarter. The merger then pivots to ``{ST}_QCEW_{metric}``
+    wide columns; ``metric`` is the human-readable name (e.g.
+    ``AverageWeeklyWage``) rather than the 3-letter file suffix so
+    downstream column names self-describe.
+    """
+    if not os.path.isdir(RAW_DIR_QCEW):
+        return pd.DataFrame()
+
+    metric_names: dict[str, str] = {
+        "EMP": "QCEW_Employment",
+        "TQW": "QCEW_TotalQuarterlyWages",
+        "AWW": "QCEW_AverageWeeklyWage",
+        "EST": "QCEW_Establishments",
+    }
+    rows: list[dict] = []
+    for fn in os.listdir(RAW_DIR_QCEW):
+        if not fn.startswith("QCEW_") or not fn.endswith(".txt"):
+            continue
+        parts = fn[:-4].split("_")
+        if len(parts) != 3:
+            continue
+        _, st, suffix = parts
+        if st not in states or suffix not in metric_names:
+            continue
+        df = pd.read_csv(os.path.join(RAW_DIR_QCEW, fn))
+        if df.empty:
+            continue
+        df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["year", "value"])
+        df = df[(df["year"] >= start) & (df["year"] <= end)]
+        for _, row in df.iterrows():
+            months = _broadcast_quarter_to_months(str(row["period"]))
+            if not months:
+                continue
+            for m in months:
+                rows.append(
+                    {
+                        "state": st,
+                        "year": int(row["year"]),
+                        "month": m,
+                        "metric": metric_names[suffix],
+                        "value": float(row["value"]),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def read_jolts(states: list, start: int, end: int) -> pd.DataFrame:
+    """
+    Read JOLTS files into a long DataFrame keyed by (year, month).
+
+    Caveat: ``utils.fetch_jolts_data`` defaults to NATIONAL JOLTS
+    series. State-level series ids exist (experimental program) but
+    aren't fetched by default. National rows are broadcast across all
+    ``states`` so each per-state row of the panel inherits the
+    national series — this is the standard pattern for national
+    macro covariates joined onto a per-state grid.
+
+    JOLTS series ids encode the metric in the last 3 characters:
+    ``JOL`` (openings), ``HIL`` (hires), ``QUL`` (quits),
+    ``LDL`` (layoffs/discharges), ``TSL`` (total separations).
+    """
+    if not os.path.isdir(RAW_DIR_JOLTS):
+        return pd.DataFrame()
+
+    suffix_to_metric: dict[str, str] = {
+        "JOL": "JOLTS_JobOpenings",
+        "HIL": "JOLTS_Hires",
+        "QUL": "JOLTS_Quits",
+        "LDL": "JOLTS_Layoffs",
+        "TSL": "JOLTS_Separations",
+    }
+    long_rows: list[dict] = []
+    for fn in os.listdir(RAW_DIR_JOLTS):
+        if not fn.endswith(".txt"):
+            continue
+        sid = fn[:-4]
+        if not sid.startswith("JTS"):
+            continue
+        suffix = sid[-3:]
+        metric = suffix_to_metric.get(suffix)
+        if metric is None:
+            continue
+        df = pd.read_csv(os.path.join(RAW_DIR_JOLTS, fn))
+        if df.empty:
+            continue
+        df = df[df["period"].astype(str).str.startswith("M")].copy()
+        df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["year", "value"])
+        df["month"] = df["period"].str[1:].astype(int)
+        df = df[(df["year"] >= start) & (df["year"] <= end)]
+        for _, row in df.iterrows():
+            long_rows.append(
+                {
+                    "year": int(row["year"]),
+                    "month": int(row["month"]),
+                    "metric": metric,
+                    "value": float(row["value"]),
+                }
+            )
+
+    if not long_rows:
+        return pd.DataFrame()
+    national = pd.DataFrame(long_rows).drop_duplicates(
+        subset=["year", "month", "metric"]
+    )
+    # Broadcast to every state. The series is national; the join is
+    # informational (every IA row sees the same national openings count
+    # for that month).
+    out_rows: list[dict] = []
+    for st in states:
+        sub = national.copy()
+        sub["state"] = st
+        out_rows.append(sub)
+    if not out_rows:
+        return pd.DataFrame()
+    return pd.concat(out_rows, ignore_index=True)
+
+
+def read_cpi(states: list, start: int, end: int) -> pd.DataFrame:
+    """
+    Read regional CPI files and broadcast each region's index back to
+    the states that belong to it (per ``ONTOLOGY.states_by_region``).
+
+    Returns long format ``(state, year, month, metric, value)`` with
+    one metric: ``CPI_AllItems``. Useful as a deflator for any
+    dollar-denominated wage series joined later (BEA, QCEW total wages).
+    """
+    if not os.path.isdir(RAW_DIR_CPI):
+        return pd.DataFrame()
+
+    # area_code -> long-format frame
+    by_area: dict[str, pd.DataFrame] = {}
+    for fn in os.listdir(RAW_DIR_CPI):
+        if not fn.endswith(".txt") or not fn.startswith("CUUR"):
+            continue
+        sid = fn[:-4]
+        # series id layout: CUUR{area:4}{item:3}
+        area = sid[4:8]
+        df = pd.read_csv(os.path.join(RAW_DIR_CPI, fn))
+        if df.empty:
+            continue
+        df = df[df["period"].astype(str).str.startswith("M")].copy()
+        df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["year", "value"])
+        df["month"] = df["period"].str[1:].astype(int)
+        df = df[(df["year"] >= start) & (df["year"] <= end)]
+        by_area[area] = df[["year", "month", "value"]].reset_index(drop=True)
+
+    if not by_area:
+        return pd.DataFrame()
+
+    rows: list[dict] = []
+    us_fallback = by_area.get("0000")
+    for st in states:
+        state_obj = ONTOLOGY.states.get(st)
+        if state_obj is None:
+            continue
+        area = _REGION_TO_CPI_AREA.get(state_obj.region, "0000")
+        df = by_area.get(area)
+        if df is None or df.empty:
+            df = us_fallback
+        if df is None or df.empty:
+            continue
+        for _, row in df.iterrows():
+            rows.append(
+                {
+                    "state": st,
+                    "year": int(row["year"]),
+                    "month": int(row["month"]),
+                    "metric": "CPI_AllItems",
+                    "value": float(row["value"]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def read_fred(states: list, start: int, end: int) -> pd.DataFrame:
+    """
+    Read FRED per-state series into long format.
+
+    ``utils.fetch_fred_data`` writes ``FRED_<sid>.txt`` files with
+    period codes ``M01..M12`` (monthly), ``Q01..Q04`` (quarterly), or
+    ``A01`` (annual). Quarterly values are broadcast into the three
+    months of the quarter; annual values are broadcast across all 12
+    months of the year — a coarse but honest join (the caller can
+    flag the column name, e.g. ``FRED_NGSP``, as annual-derived).
+
+    We extract the state code from the series id using the FRED
+    indicator registry (``utils.fetch_fred_data.FRED_INDICATORS``):
+    most use ``{ST}{IND}`` (prefix) but MHI uses
+    ``MEHOINUS{ST}A646N`` (infix), so simple slicing isn't safe.
+    """
+    if not os.path.isdir(RAW_DIR_FRED):
+        return pd.DataFrame()
+
+    # Lazy import: fetch_fred_data imports `requests`, which would be
+    # an unnecessary hard dependency for the merger on systems where
+    # FRED data hasn't been fetched.
+    try:
+        from .fetch_fred_data import FRED_INDICATORS  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        FRED_INDICATORS = {}
+
+    # Pre-compute (indicator_key, state) → series_id so we can do an
+    # O(1) reverse-lookup per file.
+    expected: dict[str, tuple[str, str, str]] = {}
+    for ind_key, (_desc, cadence, template) in FRED_INDICATORS.items():
+        for st in states:
+            sid = template.format(st=st)
+            expected[sid] = (st, ind_key, cadence)
+
+    rows: list[dict] = []
+    for fn in os.listdir(RAW_DIR_FRED):
+        if not fn.startswith("FRED_") or not fn.endswith(".txt"):
+            continue
+        sid = fn[5:-4]  # strip 'FRED_' prefix and '.txt' suffix
+        match = expected.get(sid)
+        if match is None:
+            continue
+        st, ind_key, cadence = match
+        df = pd.read_csv(os.path.join(RAW_DIR_FRED, fn))
+        if df.empty:
+            continue
+        df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["year", "value"])
+        df = df[(df["year"] >= start) & (df["year"] <= end)]
+        metric = f"FRED_{ind_key}"
+        for _, row in df.iterrows():
+            period = str(row["period"])
+            year = int(row["year"])
+            value = float(row["value"])
+            if period.startswith("M"):
+                try:
+                    m = int(period[1:])
+                except ValueError:
+                    continue
+                rows.append({"state": st, "year": year, "month": m,
+                             "metric": metric, "value": value})
+            elif period.startswith("Q"):
+                for m in _broadcast_quarter_to_months(period):
+                    rows.append({"state": st, "year": year, "month": m,
+                                 "metric": metric, "value": value})
+            elif period.startswith("A"):
+                # Broadcast annual value across all 12 months.
+                for m in range(1, 13):
+                    rows.append({"state": st, "year": year, "month": m,
+                                 "metric": metric, "value": value})
+    return pd.DataFrame(rows)
+
+
+def read_bea(states: list, start: int, end: int) -> pd.DataFrame:
+    """
+    Read BEA per-state annual personal income files.
+
+    File pattern: ``BEA_SAINC1_L<linecode>_<ST>.txt`` with one annual
+    row per year. Each value is broadcast across all 12 months of the
+    matching year — annual joins are inherently coarse, but a constant
+    per-state per-year is the right semantic for this dataset.
+    """
+    if not os.path.isdir(RAW_DIR_BEA):
+        return pd.DataFrame()
+
+    rows: list[dict] = []
+    for fn in os.listdir(RAW_DIR_BEA):
+        if not fn.startswith("BEA_") or not fn.endswith(".txt"):
+            continue
+        # File: BEA_<TABLE>_L<line>_<ST>.txt → split on '_'.
+        base = fn[:-4]
+        parts = base.split("_")
+        if len(parts) < 4:
+            continue
+        st = parts[-1]
+        if st not in states:
+            continue
+        # Build a stable metric name from the table + linecode so a
+        # caller running both L3 (per-capita) and L1 (total) doesn't
+        # collide in the wide pivot.
+        table = parts[1]
+        linecode = parts[2]
+        metric = f"BEA_{table}_{linecode}"
+        df = pd.read_csv(os.path.join(RAW_DIR_BEA, fn))
+        if df.empty:
+            continue
+        df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["year", "value"])
+        df = df[(df["year"] >= start) & (df["year"] <= end)]
+        for _, row in df.iterrows():
+            year = int(row["year"])
+            value = float(row["value"])
+            for m in range(1, 13):
+                rows.append({"state": st, "year": year, "month": m,
+                             "metric": metric, "value": value})
+    return pd.DataFrame(rows)
+
+
+def _join_long_phase_ef(panel: pd.DataFrame, long_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pivot a (state, year, month, metric, value) frame into
+    ``{ST}_{METRIC}`` wide columns and merge into ``panel``.
+
+    Used uniformly by the Phase E/F readers (QCEW, JOLTS, CPI, FRED,
+    BEA) so column-naming and the join keys stay symmetric with the
+    existing CES wide-pivot.
+    """
+    if long_df is None or long_df.empty:
+        return panel
+    # Build {ST}_{METRIC} column key.
+    long_df = long_df.copy()
+    long_df["col"] = long_df["state"] + "_" + long_df["metric"]
+    # If two source files happen to publish overlapping rows (e.g.
+    # both CPI us-avg and CPI midwest broadcast to OH), keep the first.
+    long_df = long_df.drop_duplicates(subset=["year", "month", "col"], keep="first")
+    wide = long_df.pivot_table(
+        index=["year", "month"],
+        columns="col",
+        values="value",
+        aggfunc="first",
+    )
+    wide = wide.reset_index()
+    return pd.merge(panel, wide, on=["year", "month"], how="left")
 
 
 def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
@@ -319,11 +703,49 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
     else:
         logger.error(f"[MERGE] CES JSON not found: {CES_JSON}")
 
+    # ---------------------------------------------------------------- *
+    # Phase E/F: QCEW, JOLTS, CPI, FRED, BEA
+    # ---------------------------------------------------------------- *
+    # Each reader returns (state, year, month, metric, value) long form.
+    # ``_join_long_phase_ef`` pivots into ``{ST}_{METRIC}`` columns and
+    # left-joins by (year, month). Sources that publish at coarser
+    # cadences than monthly (QCEW = quarterly, FRED-annual, BEA = annual)
+    # are pre-broadcast by their reader; sources without a per-state
+    # signal (CPI regional, JOLTS national) are pre-broadcast to every
+    # state so the column shape is always ``{ST}_{METRIC}``.
+    for source_name, reader in (
+        ("QCEW",  read_qcew),
+        ("JOLTS", read_jolts),
+        ("CPI",   read_cpi),
+        ("FRED",  read_fred),
+        ("BEA",   read_bea),
+    ):
+        try:
+            long_df = reader(states, start, end)
+        except Exception as exc:  # noqa: BLE001 — Phase E/F is best-effort
+            logger.warning(f"[MERGE] {source_name} read failed: {exc}")
+            continue
+        if long_df is None or long_df.empty:
+            logger.info(f"[MERGE] {source_name}: no rows on disk — skipping")
+            continue
+        before = panel.shape[1]
+        panel = _join_long_phase_ef(panel, long_df)
+        added = panel.shape[1] - before
+        logger.info(f"[MERGE] {source_name}: added {added} columns")
+
     return panel
 
 
-def save_data(df: pd.DataFrame, csv_path: str, json_path: str) -> None:
-    """Save merged panel to CSV and JSON."""
+def save_data(df: pd.DataFrame, csv_path, json_path) -> None:
+    """
+    Save merged panel to CSV and JSON.
+
+    Accepts ``str`` or :class:`pathlib.Path` for both paths; we coerce
+    to ``str`` before handing off to pandas / ``os.path`` to keep the
+    behavior identical on Python 3.6+.
+    """
+    csv_path = str(csv_path)
+    json_path = str(json_path)
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     df.to_csv(csv_path, index=False)
     df.to_json(json_path, orient="records", indent=4)
