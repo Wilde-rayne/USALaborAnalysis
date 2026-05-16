@@ -19,11 +19,9 @@ from dash import html  # noqa: E402
 
 from tabs import about_tab, eda_tab, lfp_tab, super_tab  # noqa: E402
 from tabs._components import (  # noqa: E402
-    empty_state,
     error_alert,
     error_boundary,
     loading_skeleton,
-    section,
     status_pill,
 )
 
@@ -62,30 +60,33 @@ class TestRenderLayout:
 
 class TestRegisterCallbacks:
     """
-    Chat was centralised into ``tabs/_chat_drawer.py`` (see I3). The
-    per-tab chat callbacks are gone — these tests now confirm the
-    tabs register only their data callbacks, and the drawer module
-    owns chat wiring via ``utils.llm_utils.generate_insight``.
+    Chat was centralised into ``tabs/_chat_drawer.py`` (see I3). Each
+    forecast tab also registers a ``poll_*_blurbs`` polling callback
+    that streams the LLM panel narratives in as they complete — these
+    tests assert the expected callback names are present without
+    over-constraining the exact set so future polling helpers don't
+    immediately break the smoke suite.
     """
 
-    def test_eda_registers_2_callbacks(self) -> None:
+    def test_eda_registers_expected_callbacks(self) -> None:
         app = FakeApp()
         eda_tab.register_callbacks(app)
         names = {r[0] for r in app.registered}
-        # update_metadata + update_eda. Chat lives in the drawer.
-        assert names == {"update_metadata", "update_eda"}
+        # update_metadata + update_eda + poll_eda_blurbs. Chat lives in
+        # the global drawer.
+        assert {"update_metadata", "update_eda"}.issubset(names)
 
-    def test_lfp_registers_forecast_callback_only(self) -> None:
+    def test_lfp_registers_forecast_callback(self) -> None:
         app = FakeApp()
         lfp_tab.register_callbacks(app)
         names = {r[0] for r in app.registered}
-        assert names == {"update_lfp"}
+        assert "update_lfp" in names
 
-    def test_super_registers_forecast_callback_only(self) -> None:
+    def test_super_registers_forecast_callback(self) -> None:
         app = FakeApp()
         super_tab.register_callbacks(app)
         names = {r[0] for r in app.registered}
-        assert names == {"update_super"}
+        assert "update_super" in names
 
     def test_about_registers_no_callbacks(self) -> None:
         app = FakeApp()
@@ -114,18 +115,6 @@ class TestStatusPill:
     def test_title_passes_through(self) -> None:
         p = status_pill("x", title="hover tip")
         assert p.title == "hover tip"
-
-
-class TestEmptyState:
-    def test_has_status_role(self) -> None:
-        es = empty_state("None", "No data yet")
-        assert es.role == "status"
-
-    def test_action_appended(self) -> None:
-        btn = html.Button("Retry")
-        es = empty_state("Empty", "body", action=btn)
-        # last child is the button.
-        assert es.children[-1] is btn
 
 
 class TestErrorAlert:
@@ -174,12 +163,14 @@ class TestErrorBoundary:
         assert ok(1).children == "hi"
 
 
-class TestSectionAndSkeleton:
-    def test_section_includes_title(self) -> None:
-        s = section("Title", html.P("body"))
-        assert s.className == "pi-section"
-
+class TestSkeleton:
     def test_skeleton_renders_n_lines(self) -> None:
         sk = loading_skeleton(lines=2)
         # Outer wrapper Div has list of skeleton Divs.
         assert len(sk.children) == 2
+
+    def test_skeleton_supports_more_than_three_lines(self) -> None:
+        # Reviews item #8: the legacy implementation silently truncated
+        # past three lines because it sliced a fixed 3-tuple.
+        sk = loading_skeleton(lines=5)
+        assert len(sk.children) == 5

@@ -4,8 +4,7 @@ Per-click blurb orchestrator with specialist subagents.
 Architecture sketch (matches the user's "nested harness" design)::
 
     base ──→ total context ──→ page context
-                                     ├──→ review → writer → review   (text track, this module)
-                                     └──→ image writer / creator     (utils.agents.image_writer)
+                                     └──→ review → writer → review   (text track, this module)
 
 - **base** (system-wide intent): defined as the LaborAgent's
   ``system_prompt`` for each specialist — what role the agent plays.
@@ -18,8 +17,6 @@ Architecture sketch (matches the user's "nested harness" design)::
 - **review → writer → review**: implemented here as
   :class:`ReviewerAgent` + :class:`HolisticReviewer` looped through
   per-section specialists.
-- **image writer**: stubbed in :mod:`utils.agents.image_writer` —
-  the parallel track that will own figure spec generation.
 
 The Day-2/Day-3 sequential runner sent every panel through the same
 generic chat agent, so each panel paid the same per-call latency and
@@ -69,12 +66,10 @@ import logging
 import os
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from functools import lru_cache
 from typing import Callable, Mapping
 
 from utils.agents.base import LaborAgent, LaborAgentConfig
 from utils.agents.ollama import (
-    AGENT_MODEL_ENV,
     CHAT_MODEL_ENV,
     OLLAMA_BASE_URL,
 )
@@ -85,7 +80,6 @@ from utils.agents.reviewer import (
     strip_preamble,
 )
 from utils.agents.sentence_rag import default_rag_builder
-from utils.constants import DEFAULT_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -212,13 +206,14 @@ def _invariant_failures_for(view_state: dict) -> list[str]:
                 f"point forecast {point} not contained in CI "
                 f"[{ci_lo}, {ci_hi}] — model bug; treat with caution"
             )
-        # CI width sanity — flag if wider than the last-actual value
-        # itself (a percent-scale series with CI > 100 % of value is
-        # essentially uninformative).
+        # CI width sanity — flag if wider than 50% of the last-actual
+        # value (a percent-scale series with CI > 50% of value is
+        # essentially uninformative). The comparison is fractional so
+        # the threshold matches the percentage the message reports.
         last_val = view_state.get("last_actual_value")
         if last_val is not None and last_val > 0:
             width = ci_hi - ci_lo
-            if width > last_val * 0.5:
+            if width / last_val > 0.5:
                 failures.append(
                     f"95 % prediction interval is {width:.1f} "
                     f"({width/last_val*100:.0f}% of the last observed "

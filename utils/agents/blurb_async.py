@@ -32,7 +32,7 @@ import time
 import uuid
 from typing import Mapping
 
-from utils.llm_utils import AI_FAILURE_MESSAGE, explain_view
+from utils.llm_utils import AI_FAILURE_MESSAGE
 
 logger = logging.getLogger(__name__)
 

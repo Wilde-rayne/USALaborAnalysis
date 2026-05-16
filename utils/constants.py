@@ -15,7 +15,6 @@ def get_env(name, default=None, cast=str):
         return cast(default)
 
 OLLAMA_CHAT_PATH  = os.getenv("OLLAMA_CHAT_PATH",  "/v1/chat/completions")
-OLLAMA_EMBED_PATH = os.getenv("OLLAMA_EMBED_PATH", "/api/embeddings")
 OLLAMA_API_PATH   = OLLAMA_CHAT_PATH
 OLLAMA_URL       = get_env("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL     = get_env("OLLAMA_MODEL", "llama2:chat")
@@ -37,8 +36,7 @@ CENSUS_API_KEY = os.getenv("CENSUS_API_KEY") or None
 API_KEY        = BLS_API_KEY  # backward-compat alias used by fetch_ces/laus
 OUTPUT_JSON = "data/all_data.json"
 
-MODEL_NAME = OLLAMA_MODEL
-LOCAL_EMBED_MODEL = "e5-small-v2"   
+LOCAL_EMBED_MODEL = "e5-small-v2"
 
 # --- Data Pipeline Settings ---
 # States covered by the dashboard. The default (12 Midwest states) keeps

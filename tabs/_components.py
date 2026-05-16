@@ -96,32 +96,6 @@ def status_pill(label: str, tone: str = "default", *, title: str | None = None) 
     )
 
 
-def empty_state(
-    title: str,
-    body: str,
-    *,
-    action: html.Button | None = None,
-    icon: str = "📊",
-) -> html.Div:
-    """
-    Consistent "nothing to show yet" block — used as a fallback when a
-    tab's data or cache isn't ready.
-    """
-    children: list[Any] = [
-        html.Div(icon, style={"fontSize": "2.5rem", "marginBottom": "0.5rem"}),
-        html.H5(title, className="mb-2"),
-        html.P(body, className="pi-muted mb-3"),
-    ]
-    if action is not None:
-        children.append(action)
-    return html.Div(
-        children,
-        className="pi-section text-center",
-        role="status",
-        **{"aria-live": "polite"},
-    )
-
-
 def error_alert(message: str, *, fallback_id: str | None = None) -> html.Div:
     """
     Friendly error banner — replaces the raw Dash/Flask traceback page
@@ -149,20 +123,20 @@ def error_alert(message: str, *, fallback_id: str | None = None) -> html.Div:
     )
 
 
-def section(title: str, *children: Any, id: str | None = None) -> html.Div:
-    """Consistent ``pi-section`` wrapper with an optional H5 heading."""
-    head = [html.H5(title)] if title else []
-    props: dict[str, Any] = {"className": "pi-section"}
-    if id:
-        props["id"] = id
-    return html.Div([*head, *children], **props)
-
-
 def loading_skeleton(*, lines: int = 3, width: str = "100%") -> html.Div:
     """
     Shimmer placeholder for not-yet-populated panels. Good for Dash's
     ``dcc.Loading`` ``children=`` arg on first render.
+
+    The width pattern (100% / 90% / 70%) repeats so callers can ask
+    for any positive ``lines`` count; previously ``lines > 3``
+    silently truncated to three rows because ``(100, 90, 70)[:lines]``
+    is bounded by the tuple's length.
     """
+    if lines < 1:
+        raise ValueError(f"loading_skeleton expects lines >= 1, got {lines}")
+    base = (100, 90, 70)
+    widths = (base * ((lines // len(base)) + 1))[:lines]
     return html.Div(
         [
             html.Div(
@@ -173,7 +147,7 @@ def loading_skeleton(*, lines: int = 3, width: str = "100%") -> html.Div:
                     "width": f"{max(40, width_pct)}%",
                 },
             )
-            for width_pct in (100, 90, 70)[:lines]
+            for width_pct in widths
         ],
         style={"width": width, "padding": "0.5rem 0"},
     )

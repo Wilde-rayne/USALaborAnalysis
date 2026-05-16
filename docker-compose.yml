@@ -7,14 +7,13 @@ services:
     image: ollama/ollama:latest
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
-      # The Day-4 BlurbOrchestrator dispatches up to 4 specialist
-      # subagents in parallel (one per panel) plus a reviewer + a
-      # holistic auditor. With NUM_PARALLEL=1 they queue serially
-      # and the first click takes 5+ minutes; bumping to 4 lets
-      # Ollama interleave token generation across streams. KV-cache
-      # reuse on shared system prompts means the wall-clock cost
-      # is only ~1.5–2× a single call rather than 4×.
-      OLLAMA_NUM_PARALLEL: "4"
+      # NUM_PARALLEL=1 matches MAX_LOADED_MODELS=1: the
+      # BlurbOrchestrator serialises specialist calls (see comment in
+      # ``utils/agents/blurb_orchestra.py`` around the single-model
+      # rationale), so allowing Ollama to interleave streams pointed
+      # to the same single resident runner was paying scheduler cost
+      # for no concurrency.
+      OLLAMA_NUM_PARALLEL: "1"
       # MAX_LOADED_MODELS=1 — the orchestrator now uses a single
       # model (``OLLAMA_MODEL``, llama3.2:3b) for every specialist
       # because phi3's runner crashed under 7.5 GB container RAM
@@ -65,8 +64,6 @@ services:
       # was kept behind at 7B and the 180 s default timeout was hitting it.
       OLLAMA_MODEL: "llama3.2:3b"
       OLLAMA_AGENT_MODEL: "phi3"
-      PYSPARK_PYTHON: /usr/local/bin/python3
-      PYSPARK_DRIVER_PYTHON: /usr/local/bin/python3
       # Reactive-startup control; see .env.example for the full enum.
       # "data"       — cache-aware data fetch only (seconds when cached).
       # "lfp"        — + train the ~10 LFP LSTM models (about a minute).

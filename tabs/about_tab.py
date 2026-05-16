@@ -9,12 +9,10 @@ visitor will read.
 """
 from __future__ import annotations
 
-from dash import Input, Output, State, dcc, html
-from dash.exceptions import PreventUpdate
+from dash import html
 
 from utils import preload_state
 from utils.constants import ALL_STATES, END_YEAR, START_YEAR
-from utils.llm_utils import generate_insight
 from utils.ontology import ONTOLOGY
 
 

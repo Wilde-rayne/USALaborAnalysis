@@ -18,7 +18,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 from typing import Iterable, List, Sequence
 
 import numpy as np
@@ -70,7 +69,11 @@ _CACHE_DIR = (
     or os.path.expanduser("~/.cache")
 )
 os.makedirs(_CACHE_DIR, exist_ok=True)
+#: NPZ holds *only* the float matrix + a SHA hash header — never the
+#: chunk strings — so we can load it with ``allow_pickle=False``. The
+#: chunk text lives in a sibling JSON file.
 CACHE_EMBEDDINGS = os.path.join(_CACHE_DIR, "embeddings_cache.npz")
+CACHE_CHUNKS = os.path.join(_CACHE_DIR, "embeddings_cache.json")
 MAX_TOKENS = 150
 BATCH_SIZE = 64
 
@@ -153,8 +156,20 @@ def _file_hash(path: str) -> str:
 
 
 def _combined_input_hash(paths: Sequence[str]) -> str:
-    """Deterministic key over existing inputs — drives cache invalidation."""
+    """
+    Deterministic key over existing inputs — drives cache invalidation.
+
+    The active embedding model name is mixed in so that switching
+    ``LOCAL_EMBED_MODEL`` (e.g. e5-small-v2 → all-MiniLM-L6-v2) cannot
+    re-use stale vectors from a different model that happen to have the
+    same dimensionality.
+    """
     h = hashlib.sha256()
+    # Bind the cache to the model that produced it. Without this guard
+    # a model swap leaves vectors that look fresh and load silently.
+    h.update(b"model=")
+    h.update(LOCAL_EMBED_MODEL.encode("utf-8"))
+    h.update(b"\n")
     for p in paths:
         if os.path.exists(p):
             h.update(bytes.fromhex(_file_hash(p)))
@@ -173,24 +188,6 @@ def _split_text_into_chunks(text: str, chunk_size: int | None = None) -> List[st
         part = _tokenizer.decode(toks[i : i + limit], skip_special_tokens=True)
         if part.strip():
             out.append(part.strip())
-    return out
-
-
-def preprocess_for_embedding(text: str, context_prefix: str = "In") -> List[str]:
-    """
-    Turn a "key: value; key: value" record into natural-language sentences.
-    Only keeps numeric values so the embedder sees "reported N thousand jobs"
-    phrases rather than raw key-value blobs.
-    """
-    out = []
-    for entry in text.split(";"):
-        entry = entry.strip()
-        if ":" not in entry:
-            continue
-        key, val = map(str.strip, entry.split(":", 1))
-        if not re.fullmatch(r"-?\d+(?:\.\d+)?", val):
-            continue
-        out.append(f"{context_prefix} {key} reported {val} thousand jobs.")
     return out
 
 
@@ -271,15 +268,34 @@ def load_embeddings() -> tuple[List[str], np.ndarray]:
         (OUTPUT_JSON, README_PATH, REPORT_PATH, MILESTONE_PATH)
     )
 
-    if os.path.exists(CACHE_EMBEDDINGS):
-        cache = np.load(CACHE_EMBEDDINGS, allow_pickle=True)
-        if str(cache.get("hash")) == key:
-            logger.info(f"[EMB] cache hit: {CACHE_EMBEDDINGS}")
-            _chunks = cache["chunks"].tolist()
-            _embs = cache["embs"]
-            _chunk_tokens = [_tokenize_for_overlap(c) for c in _chunks]
-            return _chunks, _embs
-        logger.info(f"[EMB] cache stale ({CACHE_EMBEDDINGS}); rebuilding")
+    if os.path.exists(CACHE_EMBEDDINGS) and os.path.exists(CACHE_CHUNKS):
+        # ``allow_pickle=False`` is mandatory: the cache directory is
+        # under ``HF_HOME`` (often shared / world-writable on CI hosts),
+        # and pickle deserialization would be a remote-code-execution
+        # sink. The matrix is plain float32; chunk strings live in the
+        # JSON sidecar.
+        try:
+            cache = np.load(CACHE_EMBEDDINGS, allow_pickle=False)
+            # ``.item()`` extracts the Python str/bytes from a 0-d
+            # numpy array regardless of whether the dtype is ``U`` or
+            # ``S``; it raises if the array is multi-element, which is
+            # the desired signal that the cache file is malformed.
+            raw_hash = cache["hash"].item()
+            cache_key = raw_hash.decode("utf-8") if isinstance(raw_hash, bytes) else str(raw_hash)
+            if cache_key == key:
+                with open(CACHE_CHUNKS, encoding="utf-8") as f:
+                    sidecar = json.load(f)
+                if sidecar.get("hash") == key:
+                    logger.info(f"[EMB] cache hit: {CACHE_EMBEDDINGS}")
+                    _chunks = list(sidecar["chunks"])
+                    _embs = np.asarray(cache["embs"], dtype=np.float32)
+                    _chunk_tokens = [_tokenize_for_overlap(c) for c in _chunks]
+                    return _chunks, _embs
+            logger.info(f"[EMB] cache stale ({CACHE_EMBEDDINGS}); rebuilding")
+        except (KeyError, ValueError, OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                f"[EMB] cache load failed ({type(exc).__name__}: {exc}); rebuilding"
+            )
 
     logger.info("[EMB] collecting chunks")
     chunks = _collect_chunks()
@@ -296,12 +312,15 @@ def load_embeddings() -> tuple[List[str], np.ndarray]:
     )
     embs = _embed_texts(chunks)
 
+    # Persist matrix + hash *without* pickling Python objects. Chunk
+    # text rides alongside in a JSON sidecar.
     np.savez_compressed(
         CACHE_EMBEDDINGS,
-        hash=key,
-        chunks=np.array(chunks, dtype=object),
+        hash=np.asarray(key, dtype="U64"),
         embs=embs,
     )
+    with open(CACHE_CHUNKS, "w", encoding="utf-8") as f:
+        json.dump({"hash": key, "chunks": chunks}, f)
     logger.info(f"[EMB] saved {embs.shape} → {CACHE_EMBEDDINGS}")
     _chunks, _embs = chunks, embs
     _chunk_tokens = [_tokenize_for_overlap(c) for c in _chunks]

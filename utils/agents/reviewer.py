@@ -51,34 +51,44 @@ REVIEWER_SYSTEM_PROMPT = (
 #: directly when LLM-review is disabled (the reactive default).
 #:
 #: Match strings are lower-cased + use plain ASCII apostrophes; the
-#: stripper does the case-insensitive comparison.
-_PREAMBLE_MARKERS: tuple[str, ...] = (
-    "here's a plain-english",
-    "here is a plain-english",
-    "here's an explanation",
-    "here is an explanation",
-    "here's a 3-sentence",
-    "here is a 3-sentence",
-    "here's a possible",
-    "here is a possible",
-    "let me explain",
-    "the panel shows that",
-    "based on the facts",
-    "based on the panel facts",
-    "based on the panel",
-    "based on the provided facts",
-    "based on the provided information",
-    "based on the provided data",
-    "based on the information provided",
-    "according to the panel",
-    "according to the facts",
-    "in this analysis",
-    "executive summary:",
-    "panel: executive summary",
-    "panel:",
-    "topic:",
-    "headline:",
-    "headline finding:",
+#: stripper does the case-insensitive comparison. Markers are kept
+#: sorted longest-first at module load so the stripper can short-
+#: circuit on the most specific prefix before a shorter one (e.g.
+#: "based on the panel facts" must match before "based on the panel"
+#: so the discriminating suffix doesn't bleed into the kept text).
+_PREAMBLE_MARKERS: tuple[str, ...] = tuple(
+    sorted(
+        (
+            "here's a plain-english",
+            "here is a plain-english",
+            "here's an explanation",
+            "here is an explanation",
+            "here's a 3-sentence",
+            "here is a 3-sentence",
+            "here's a possible",
+            "here is a possible",
+            "let me explain",
+            "the panel shows that",
+            "based on the facts",
+            "based on the panel facts",
+            "based on the panel",
+            "based on the provided facts",
+            "based on the provided information",
+            "based on the provided data",
+            "based on the information provided",
+            "according to the panel",
+            "according to the facts",
+            "in this analysis",
+            "executive summary:",
+            "panel: executive summary",
+            "panel:",
+            "topic:",
+            "headline:",
+            "headline finding:",
+        ),
+        key=len,
+        reverse=True,
+    )
 )
 
 
@@ -400,12 +410,11 @@ class TileReviewer:
     :class:`ReviewerAgent` (per-section text) and
     :class:`HolisticReviewer` (cross-section coherence).
 
-    Today the figure spec is None for every tile (the image-writer
-    track is :mod:`utils.agents.image_writer` and still stubbed), so
-    :meth:`TileReviewer.review` short-circuits to PASS. When the
-    figure-builder lands the LLM round-trip kicks in and the
-    auditor's REVISE feedback flows back into the same one-shot
-    revise path the holistic reviewer uses.
+    Today the figure spec is None for every tile (no image-writer
+    track is wired in this slice), so :meth:`TileReviewer.review`
+    short-circuits to PASS. When a figure-builder eventually lands the
+    LLM round-trip kicks in and the auditor's REVISE feedback flows
+    back into the same one-shot revise path the holistic reviewer uses.
     """
 
     def __init__(
@@ -436,8 +445,9 @@ class TileReviewer:
         Audit a single ``(figure, blurb)`` tile.
 
         Returns ``{"passed", "feedback"}``. When ``figure_spec`` is
-        ``None`` (the current default — see :mod:`image_writer`) the
-        method bias-passes since we have nothing to cross-check against.
+        ``None`` (the current default — no image-writer track is wired)
+        the method bias-passes since we have nothing to cross-check
+        against.
         """
         if figure_spec is None:
             # Image-writer track is stubbed; fall through to PASS. The

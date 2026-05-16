@@ -1,9 +1,6 @@
 # Dockerfile.dashboard
 FROM python:3.11-slim
 
-# Make Spark's hard-coded /usr/bin/python3 path exist
-RUN ln -s /usr/local/bin/python3 /usr/bin/python3
-
 # Environment variables. Caches live under /app so a non-root runtime
 # user (added below) can read them; previously they were scoped to
 # /root/.cache which becomes inaccessible after dropping privileges.
@@ -13,18 +10,15 @@ ENV PYTHONUNBUFFERED=1 \
     TF_CPP_MIN_LOG_LEVEL=2 \
     TRANSFORMERS_CACHE=/app/.cache \
     SENTENCE_TRANSFORMERS_HOME=/app/.cache \
-    HF_HOME=/app/.cache \
-    PYSPARK_PYTHON=/usr/local/bin/python3 \
-    PYSPARK_DRIVER_PYTHON=/usr/local/bin/python3
+    HF_HOME=/app/.cache
 
 # Set working directory
 WORKDIR /app
 
-# System-level deps. openjdk-21 is the current Debian bookworm JRE and is
-# supported by PySpark >=3.5; the older openjdk-17 was removed from the
-# python:3.11-slim apt index.
+# System-level deps. PySpark has been retired so the JRE is no longer
+# required — keeping only the small CLI tools the runtime calls out to.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends openjdk-21-jre-headless git curl procps && \
+    apt-get install -y --no-install-recommends git curl procps && \
     rm -rf /var/lib/apt/lists/*
 
 # Create the unprivileged runtime user up front so subsequent COPYs

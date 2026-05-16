@@ -31,8 +31,8 @@ import plotly.graph_objs as go
 from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
-from utils.constants import ALL_STATES, MONTH_MAP
-from utils.data_pipeline import OUTPUT_JSON, ensure_data
+from utils.constants import ALL_STATES
+from utils.data_pipeline import ensure_data
 from utils.forecasting import ForecastResult, select_forecaster
 from utils.forecasting.trend import (
     TrendSummary,
@@ -40,7 +40,6 @@ from utils.forecasting.trend import (
     summarize_trend,
 )
 from utils.agents import blurb_async
-from utils.llm_utils import AI_FAILURE_MESSAGE, explain_view
 from utils.ontology import ONTOLOGY
 from tabs._methodology import LFPR_DENOMINATOR_NOTE, methodology_panel
 from tabs._components import (
@@ -54,11 +53,48 @@ from tabs._components import (
 
 logger = logging.getLogger(__name__)
 
+def _current_year() -> int:
+    """
+    Indirection over ``datetime.now().year`` so tests around the
+    year-boundary (gap-anchor computation in ``update_lfp``) can
+    monkey-patch a fixed year without having to freezegun the whole
+    clock. Production callers always read the wall clock.
+    """
+    return datetime.now().year
+
+
 # ---------------------------------------------------------------------------
 # Cache: (metric_key, state_code, years_ahead) → ForecastResult.
-# Gets populated on demand inside the callback.
+# Gets populated on demand inside the callback. Wrapped in a small
+# OrderedDict-backed LRU bound so a long-lived gunicorn worker that
+# sees many distinct (metric, state, horizon) clicks doesn't leak
+# memory across its lifetime. 64 entries covers ~5 horizons × ~12
+# states × the two metrics without churn.
 # ---------------------------------------------------------------------------
-lfp_model_cache: dict[tuple[str, str, int], ForecastResult] = {}
+from collections import OrderedDict
+
+
+class _LRUCache(OrderedDict):
+    """Bounded OrderedDict — newest insertion stays at the right end."""
+
+    def __init__(self, maxsize: int) -> None:
+        super().__init__()
+        self.maxsize = maxsize
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value) -> None:
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self.maxsize:
+            self.popitem(last=False)
+
+
+lfp_model_cache: _LRUCache = _LRUCache(maxsize=64)
 
 #: What the user can forecast on this tab. Both are LAUS-derived and
 #: percent-scale, which simplifies the chart axis + requirement UX.
@@ -100,16 +136,10 @@ def _compute_unemployment_rate(df: pd.DataFrame) -> pd.DataFrame:
 
 def _load_lfp_panel() -> pd.DataFrame:
     """Load and dedupe the panel, then add derived unemployment rate columns."""
+    from utils.data_pipeline import load_panel_df
+
     ensure_data()
-    df = pd.read_json(OUTPUT_JSON, orient="records")
-    df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
-    df["date"] = pd.to_datetime(
-        df["year"].astype(str) + "-" + df["period"] + "-01",
-        format="%Y-%B-%d",
-        errors="coerce",
-    )
-    df.sort_values("date", inplace=True)
-    df = df.drop_duplicates(subset="date")
+    df = load_panel_df()
     df = _compute_unemployment_rate(df)
     return df
 
@@ -639,7 +669,10 @@ def register_callbacks(app):
         # months that have elapsed but BLS hasn't published yet (the
         # "data lag"), and the model's forward look.
         last_date = df["date"].max()
-        gap_anchor = pd.Timestamp(year=datetime.now().year + 1, month=1, day=1)
+        # ``_current_year()`` is the injection seam — tests monkey-patch
+        # it to freeze the gap-anchor across year boundaries instead of
+        # freezegunning ``datetime.now``.
+        gap_anchor = pd.Timestamp(year=_current_year() + 1, month=1, day=1)
         gap_months = max(
             0,
             (gap_anchor.year - last_date.year) * 12 + (gap_anchor.month - last_date.month) - 1,

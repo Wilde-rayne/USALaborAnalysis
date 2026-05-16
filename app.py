@@ -12,7 +12,6 @@ from utils.constants import (
     ALL_STATES,
     DEFAULT_TIMEOUT,
     END_YEAR,
-    MONTH_MAP,
     OLLAMA_API_PATH,
     OLLAMA_MODEL,
     OLLAMA_URL,
@@ -63,23 +62,11 @@ def _warm_ollama() -> None:
 
 
 def _load_panel_df():
-    """Load the merged panel JSON into a date-indexed DataFrame."""
-    import pandas as pd
+    """Thin wrapper around ``utils.data_pipeline.load_panel_df`` for
+    backward-compatibility with callers inside this module."""
+    from utils.data_pipeline import load_panel_df
 
-    from utils.data_pipeline import OUTPUT_JSON
-
-    df = pd.read_json(OUTPUT_JSON, orient="records")
-    df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
-    df["date"] = pd.to_datetime(
-        df["year"].astype(str) + "-" + df["period"] + "-01",
-        format="%Y-%B-%d",
-        errors="coerce",
-    )
-    df.sort_values("date", inplace=True)
-    # Collapse (state, year, month) rows to one per date — wide columns
-    # are identical across the 12 state-rows that share a date.
-    df = df.drop_duplicates(subset="date")
-    return df
+    return load_panel_df()
 
 
 def _preload_lfp_models(df) -> None:

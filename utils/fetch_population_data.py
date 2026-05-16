@@ -3,24 +3,13 @@ import os, requests
 from typing import List
 import logging
 from .constants import CENSUS_API_KEY
+from .ontology import ONTOLOGY
 
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 RAW_DIR = "data/raw/laus"
 ACS_URL = "https://api.census.gov/data/{year}/acs/acs1"
 PEP_URL = "https://api.census.gov/data/{year}/pep/population"
-
-# FIPS codes for states
-STATE_FIPS = {
-    "AL": "01","AK": "02","AZ": "04","AR": "05","CA": "06","CO": "08","CT": "09","DE": "10",
-    "FL": "12","GA": "13","HI": "15","ID": "16","IL": "17","IN": "18","IA": "19","KS": "20",
-    "KY": "21","LA": "22","ME": "23","MD": "24","MA": "25","MI": "26","MN": "27","MS": "28",
-    "MO": "29","MT": "30","NE": "31","NV": "32","NH": "33","NJ": "34","NM": "35","NY": "36",
-    "NC": "37","ND": "38","OH": "39","OK": "40","OR": "41","PA": "42","RI": "44","SC": "45",
-    "SD": "46","TN": "47","TX": "48","UT": "49","VT": "50","VA": "51","WA": "53","WV": "54",
-    "WI": "55","WY": "56"
-}
 
 def _fetch_acs(year: int, fips: str) -> int | None:
     url = (
@@ -32,7 +21,8 @@ def _fetch_acs(year: int, fips: str) -> int | None:
         resp = requests.get(url, timeout=10); resp.raise_for_status()
         data = resp.json()
         return int(data[1][0]) if len(data) > 1 else None
-    except:
+    except Exception as e:
+        logger.warning(f"[POP] ACS lookup failed for fips={fips} year={year}: {e}")
         return None
 
 def _fetch_pep(year: int, fips: str) -> int | None:
@@ -45,7 +35,8 @@ def _fetch_pep(year: int, fips: str) -> int | None:
         resp = requests.get(url, timeout=10); resp.raise_for_status()
         data = resp.json()
         return int(data[1][0]) if len(data) > 1 else None
-    except:
+    except Exception as e:
+        logger.warning(f"[POP] PEP lookup failed for fips={fips} year={year}: {e}")
         return None
 
 def _fetch_population(year: int, fips: str) -> int | None:
@@ -73,10 +64,11 @@ def fetch_population(states: List[str], start: int, end: int) -> None:
         )
     os.makedirs(RAW_DIR, exist_ok=True)
     for st in states:
-        if st not in STATE_FIPS:
+        state = ONTOLOGY.states.get(st.upper())
+        if state is None:
             logger.warning(f"[POP] Unknown state {st}")
             continue
-        fips = STATE_FIPS[st]
+        fips = state.fips
         pop_data = {}
         missing_years = []
         for yr in range(start, end+1):

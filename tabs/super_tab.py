@@ -17,8 +17,8 @@ from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
 from utils.agents import blurb_async
-from utils.constants import ALL_STATES, MONTH_MAP, SUPERSECTORS
-from utils.data_pipeline import OUTPUT_JSON, ensure_data
+from utils.constants import ALL_STATES, SUPERSECTORS
+from utils.data_pipeline import ensure_data
 from utils.forecasting import ForecastResult, select_forecaster
 from utils.forecasting.models import default_candidates
 from utils.ontology import ONTOLOGY
@@ -55,22 +55,46 @@ SORT_OPTIONS: list[dict] = [
 
 logger = logging.getLogger(__name__)
 
-# Cache keyed by (sector, years). Value: {state: ForecastResult}.
-supersector_model_cache: dict[tuple[str, int], dict[str, ForecastResult]] = {}
+#: Reserved labels used for aggregate rows in the forecast dict. State
+#: codes never collide with these strings, so a set-membership filter is
+#: the safe way to separate per-state forecasts from the reference rows
+#: the layout also keeps in the same dict.
+AGGREGATE_KEYS: frozenset[str] = frozenset({"Region Mean", "Region Median"})
+
+# Cache keyed by (sector, years). Value: {state: ForecastResult}. The
+# bounded LRU wrapper guarantees the worker process can't grow without
+# limit if a user explores many sector × horizon combinations.
+from collections import OrderedDict
+
+
+class _LRUCache(OrderedDict):
+    """Bounded OrderedDict — newest insertion stays at the right end."""
+
+    def __init__(self, maxsize: int) -> None:
+        super().__init__()
+        self.maxsize = maxsize
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value) -> None:
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self.maxsize:
+            self.popitem(last=False)
+
+
+supersector_model_cache: _LRUCache = _LRUCache(maxsize=64)
 
 
 def _load_super_panel() -> pd.DataFrame:
+    from utils.data_pipeline import load_panel_df
+
     ensure_data()
-    df = pd.read_json(OUTPUT_JSON, orient="records")
-    df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
-    df["date"] = pd.to_datetime(
-        df["year"].astype(str) + "-" + df["period"] + "-01",
-        format="%Y-%B-%d",
-        errors="coerce",
-    )
-    df.sort_values("date", inplace=True)
-    df = df.drop_duplicates(subset="date")
-    return df
+    return load_panel_df()
 
 
 def _get_or_train_supersector(
@@ -161,7 +185,7 @@ def _recommendation_panel(
     """
     # Separate per-state forecasts from the aggregate rows the caller
     # also sticks into ``forecasts``.
-    states_only = {k: v for k, v in forecasts.items() if not k.startswith("Midwest")}
+    states_only = {k: v for k, v in forecasts.items() if k not in AGGREGATE_KEYS}
     if len(states_only) < 2:
         return html.Div()
 
@@ -232,17 +256,17 @@ def _apply_threshold(
 ) -> dict[str, float]:
     """
     Drop per-state entries whose forecast is below ``threshold_pct``% of
-    the median. Aggregate rows ("Midwest Mean / Median") always pass.
-    A ``None`` or non-positive threshold disables the filter.
+    the median. Aggregate rows (``AGGREGATE_KEYS``) always pass. A
+    ``None`` or non-positive threshold disables the filter.
     """
     if not threshold_pct or threshold_pct <= 0:
         return forecasts
-    states_only = {k: v for k, v in forecasts.items() if not k.startswith("Midwest")}
+    states_only = {k: v for k, v in forecasts.items() if k not in AGGREGATE_KEYS}
     if not states_only:
         return forecasts
     median = float(np.median(list(states_only.values())))
     cutoff = median * (threshold_pct / 100.0)
-    kept = {k: v for k, v in forecasts.items() if k.startswith("Midwest") or v >= cutoff}
+    kept = {k: v for k, v in forecasts.items() if k in AGGREGATE_KEYS or v >= cutoff}
     return kept
 
 

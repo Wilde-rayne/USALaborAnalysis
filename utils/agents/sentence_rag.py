@@ -10,26 +10,22 @@ dumps, so instead of feeding ``Labor_Force: 1500000; Population:
     Iowa's 2020 labor force participation rate of 47.6% ranked fourth
     among Midwest states, below Minnesota (58.2%) and North Dakota (63.4%).
 
-The builder is split into three layers so callers can compose what
+The builder is split into two layers so callers can compose what
 they need:
 
 1. :meth:`fact_sentences` — deterministic "per (state, year, metric)"
    summaries. Cheap, runs at data-refresh time.
 2. :meth:`ranking_sentences` — ontology-enriched comparative framing
    that gives the embedder context (peer groups, rank positions).
-3. :meth:`agent_polish` — optional pass through the worker LLM for
-   stylistic polish. Expensive; off by default.
 
-``build_corpus`` wires the first two up; the agent pass stays opt-in
-via the ``polish=True`` flag so the common case is zero-LLM-call.
+``build_corpus`` wires both up; the corpus is always zero-LLM-call.
 """
 from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from typing import Iterable, Sequence
+from typing import Iterable
 
-from utils.agents.base import LaborAgent
 from utils.ontology import ONTOLOGY, Measure, Ontology, State
 
 logger = logging.getLogger(__name__)
@@ -54,10 +50,8 @@ class SentenceRAGBuilder:
     def __init__(
         self,
         ontology: Ontology | None = None,
-        agent: LaborAgent | None = None,
     ) -> None:
         self.ontology = ontology or ONTOLOGY
-        self.agent = agent
         # Cache: {metric_key: Measure}
         self._measures = {m.key: m for m in self.ontology.measures.values()}
 
@@ -251,46 +245,17 @@ class SentenceRAGBuilder:
         return out
 
     # ------------------------------------------------------------------
-    # Layer 3 — optional LLM polish
-    # ------------------------------------------------------------------
-    def agent_polish(self, sentences: Sequence[str]) -> list[str]:
-        """
-        Send each sentence through the worker agent for stylistic polish.
-
-        Expensive — one LLM call per sentence. Off by default; call this
-        only when you're willing to pay ~1-3 s per sentence.
-        """
-        if self.agent is None:
-            logger.info("[rag] agent_polish skipped — no agent attached")
-            return list(sentences)
-
-        polished: list[str] = []
-        for s in sentences:
-            prompt = (
-                "Rewrite the following factual statement as one natural, "
-                "fluent English sentence. Keep every number exactly as given. "
-                "Do not add claims that aren't in the input. "
-                f'Input: "{s}"'
-            )
-            out = self.agent.invoke(prompt)
-            polished.append(out.strip() or s)
-        return polished
-
-    # ------------------------------------------------------------------
     # Top-level
     # ------------------------------------------------------------------
-    def build_corpus(
-        self, records: Iterable[dict], *, polish: bool = False
-    ) -> list[str]:
-        """Deterministic facts + ontology ranks + trends (+ optional polish)."""
+    def build_corpus(self, records: Iterable[dict]) -> list[str]:
+        """Deterministic facts + ontology ranks + trends."""
         # Materialize the records once — each layer wants to iterate.
         records_list = list(records)
-        sentences = (
+        return (
             self.fact_sentences(records_list)
             + self.ranking_sentences(records_list)
             + self.trend_sentences(records_list)
         )
-        return self.agent_polish(sentences) if polish else sentences
 
     # ------------------------------------------------------------------
     # View-state rendering
@@ -318,7 +283,6 @@ class SentenceRAGBuilder:
             "trend_panel": self._render_trend_panel,
             "recap": self._render_recap,
             # EDA tab
-            "eda_overview": self._render_eda_overview,
             "eda_timeseries": self._render_eda_timeseries,
             "eda_distribution": self._render_eda_distribution,
             "eda_volatility": self._render_eda_volatility,
@@ -528,32 +492,6 @@ class SentenceRAGBuilder:
         return [f"{k}: {v}" for k, v in vs.items() if not k.startswith("_") and k != "title"]
 
     # --- EDA tab renderers ---
-    def _render_eda_overview(self, vs: dict) -> list[str]:
-        states = vs.get("states") or []
-        year_lo, year_hi = self._unpack_pair(vs.get("year_range"))
-        n_records = vs.get("n_records")
-        last_refresh = vs.get("last_refreshed")
-        sentences: list[str] = []
-        state_labels = [self._state_label(s) for s in states if s]
-        if state_labels:
-            sentences.append(
-                f"The exploratory view is currently scoped to "
-                f"{len(state_labels)} state(s): {', '.join(state_labels)}."
-            )
-        if year_lo and year_hi:
-            sentences.append(
-                f"The temporal window is {year_lo}–{year_hi} "
-                f"({year_hi - year_lo + 1} years)."
-            )
-        if n_records is not None:
-            sentences.append(
-                f"The merged labor panel currently holds "
-                f"{int(n_records):,} state-month records."
-            )
-        if last_refresh:
-            sentences.append(f"Data last refreshed: {last_refresh}.")
-        return sentences
-
     def _render_eda_timeseries(self, vs: dict) -> list[str]:
         measures = vs.get("measures") or []
         states = vs.get("states") or []

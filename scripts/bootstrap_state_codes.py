@@ -10,7 +10,7 @@ source of truth — the ontology — than re-type 200+ rows.
 
 Invoke with::
 
-    python -m utils.bootstrap_state_codes
+    python -m scripts.bootstrap_state_codes
 
 Any existing JSON at the target paths is overwritten. Runs are
 idempotent — identical inputs always produce identical output.

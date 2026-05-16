@@ -2,12 +2,8 @@
 Unit tests for utils.agents.sentence_rag.
 
 Deterministic layers (facts, rankings, trends) run in every CI path.
-``agent_polish`` is tested against a mocked agent to avoid a real
-Ollama round-trip.
 """
 from __future__ import annotations
-
-from typing import Any
 
 import pytest
 
@@ -118,46 +114,6 @@ class TestBuildCorpus:
         assert any("averaged" in s for s in corpus)            # fact
         assert any("ranked" in s for s in corpus)              # ranking
         assert any("rose" in s or "fell" in s for s in corpus) # trend
-
-    def test_polish_off_by_default_keeps_input(self, sample_records) -> None:
-        builder = SentenceRAGBuilder()  # no agent
-        corpus_plain = builder.build_corpus(sample_records)
-        corpus_polished = builder.build_corpus(sample_records, polish=True)
-        # No agent ⇒ polish is a no-op.
-        assert corpus_plain == corpus_polished
-
-
-class TestAgentPolish:
-    def test_no_agent_returns_inputs_unchanged(self) -> None:
-        builder = SentenceRAGBuilder()
-        inp = ["Alpha.", "Beta."]
-        assert builder.agent_polish(inp) == inp
-
-    def test_agent_polish_invokes_once_per_sentence(self) -> None:
-        calls: list[str] = []
-
-        class FakeAgent:
-            def invoke(self, prompt: str, **_: Any) -> str:
-                calls.append(prompt)
-                return "polished: " + prompt.split('"')[-2]  # extract Input
-
-        builder = SentenceRAGBuilder(agent=FakeAgent())  # type: ignore[arg-type]
-        out = builder.agent_polish(["Alpha.", "Beta."])
-        assert len(out) == 2
-        assert out[0].startswith("polished:")
-        assert out[1].startswith("polished:")
-        assert len(calls) == 2
-
-    def test_agent_polish_falls_back_on_empty_response(self) -> None:
-        class EmptyAgent:
-            def invoke(self, prompt: str, **_: Any) -> str:
-                return "   "  # blank
-
-        builder = SentenceRAGBuilder(agent=EmptyAgent())  # type: ignore[arg-type]
-        out = builder.agent_polish(["Original."])
-        # Blank response → keep the original text.
-        assert out == ["Original."]
-
 
 class TestHelpers:
     @pytest.mark.parametrize(

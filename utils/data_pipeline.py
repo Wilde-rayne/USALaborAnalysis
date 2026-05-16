@@ -14,10 +14,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
-
 import pandas as pd
 
+from .constants import MONTH_MAP
 from .fetch_ces_data import fetch_ces_data
 from .fetch_laus_data import fetch_laus_data
 from .fetch_population_data import fetch_population
@@ -27,6 +26,31 @@ logger = logging.getLogger(__name__)
 
 OUTPUT_JSON = "data/all_data.json"
 OUTPUT_CSV  = "data/all_data.csv"
+
+
+def load_panel_df(json_path: str | None = None) -> pd.DataFrame:
+    """
+    Load the merged panel JSON into a date-indexed, deduped DataFrame.
+
+    Centralised helper for the tabs (and ``app.py`` preload) so the
+    "read JSON → MONTH_MAP → build date → drop duplicates" recipe lives
+    in exactly one place. Callers can override ``json_path`` for tests;
+    production should rely on the default (``OUTPUT_JSON``) which is
+    monkey-patchable.
+    """
+    path = json_path or OUTPUT_JSON
+    df = pd.read_json(path, orient="records")
+    df["period"] = df["period"].map(MONTH_MAP).fillna(df["period"])
+    df["date"] = pd.to_datetime(
+        df["year"].astype(str) + "-" + df["period"] + "-01",
+        format="%Y-%B-%d",
+        errors="coerce",
+    )
+    df.sort_values("date", inplace=True)
+    # Collapse (state, year, month) rows to one per date — wide columns
+    # are identical across the per-state rows that share a date.
+    df = df.drop_duplicates(subset="date")
+    return df
 
 # How long a cached merge is considered fresh before we re-fetch.
 # Override with CACHE_MAX_AGE_SECONDS env var at container start.
@@ -94,55 +118,6 @@ def ensure_data(
 
     return OUTPUT_JSON
 
-def validate_lfpr_data(
-    df: pd.DataFrame,
-    states: list[str],
-    start_year: int,
-    end_year: int,
-) -> dict[str, dict[int, list[int]]]:
-    """
-    Report which ``{state}_Labor_Force_Participation_Rate`` wide-column
-    observations are missing across the requested span.
-
-    Returns a ``{state: {year: [missing_month_ints]}}`` dict and emits a
-    ``WARNING`` log line listing the gaps. Callers can branch on a
-    truthy return value to signal to the UI that a refresh is worth
-    running. Uses the integer ``month`` column the merger now produces,
-    not the old "period == 'January'" string shape.
-    """
-    issues: dict[str, dict[int, list[int]]] = {}
-    year_range = range(start_year, end_year + 1)
-    month_range = range(1, 13)
-    panel = df.drop_duplicates(subset="date") if "date" in df.columns else df
-    for state in states:
-        col = f"{state}_Labor_Force_Participation_Rate"
-        if col not in panel.columns:
-            issues[state] = {yr: list(month_range) for yr in year_range}
-            continue
-
-        mask = panel[col].notna()
-        present: set[tuple[int, int]] = {
-            (int(y), int(m))
-            for y, m in zip(panel.loc[mask, "year"], panel.loc[mask, "month"])
-        }
-        expected = {(yr, m) for yr in year_range for m in month_range}
-        missing = sorted(expected - present)
-        if missing:
-            gaps: dict[int, list[int]] = {}
-            for yr, m in missing:
-                gaps.setdefault(yr, []).append(m)
-            issues[state] = gaps
-
-    if issues:
-        lines = [
-            f"{st}: missing {sum(len(ms) for ms in gaps.values())} months "
-            f"across {len(gaps)} year(s)"
-            for st, gaps in issues.items()
-        ]
-        logger.warning("[LFPR-validate] gaps — " + "; ".join(lines))
-    return issues
-
-
 def refresh_all(states: list[str], start_year: int, end_year: int):
     """
     Runs the full data pipeline:
@@ -151,7 +126,6 @@ def refresh_all(states: list[str], start_year: int, end_year: int):
       3. Fetch Population data for given states and years
       4. Merge all into a single dataset
       5. Save to CSV and JSON
-      6. Validate completeness of LFPR data
     """
     try:
         logger.info(f"[PIPE] Fetching data for states: {states} ({start_year}-{end_year})")
@@ -163,7 +137,6 @@ def refresh_all(states: list[str], start_year: int, end_year: int):
         merged_df = merged_df.sort_values(["year","period"])
         save_data(merged_df, OUTPUT_CSV, OUTPUT_JSON)
         logger.info(f"[PIPE] Data saved to {OUTPUT_CSV} and {OUTPUT_JSON}")
-        #validate_lfpr_data(merged_df, states, start_year, end_year)
     except Exception as e:
         logger.error(f"[PIPE] Error in refresh_all: {e}")
 

@@ -14,29 +14,50 @@ DASH_PORT=8050
 OLLAMA_MODELS=("llama2:chat")
 FULL_REBUILD=false
 DEV_MODE=false
+YES_INSTALL=false
 
-case "${1:-}" in
-  --full) FULL_REBUILD=true ;;
-  --dev)  DEV_MODE=true  ;;
-esac
+for arg in "$@"; do
+  case "$arg" in
+    --full)         FULL_REBUILD=true ;;
+    --dev)          DEV_MODE=true ;;
+    --yes-install)  YES_INSTALL=true ;;
+  esac
+done
 
 # ——————————————————————————————
 # Functions
 # ——————————————————————————————
+require_install_consent() {
+  # Block root-level package installs unless the user explicitly opted
+  # in. Print the plan so the operator knows what would happen.
+  local plan=$1
+  if [ "$YES_INSTALL" = true ]; then
+    echo "-- --yes-install set: proceeding with: $plan"
+    return 0
+  fi
+  echo "✖ Refusing to run a privileged install without consent." >&2
+  echo "   Plan: $plan" >&2
+  echo "   Re-run with --yes-install to authorise, or install the dependency manually first." >&2
+  exit 1
+}
+
 install_docker() {
-  echo "-- Docker not found: installing"
+  echo "-- Docker not found"
   case "$OS" in
     linux)
+      require_install_consent "sudo apt-get update && sudo apt-get install -y docker.io && enable+start docker.service"
       sudo apt-get update && sudo apt-get install -y docker.io
       sudo systemctl enable docker && sudo systemctl start docker
       ;;
     macos)
       command -v brew >/dev/null || { echo "Please install Homebrew: https://brew.sh"; exit 1; }
+      require_install_consent "brew install --cask docker"
       brew install --cask docker
       echo "→ Start Docker Desktop manually."
       ;;
     windows)
       command -v choco >/dev/null || { echo "Please install Chocolatey: https://chocolatey.org"; exit 1; }
+      require_install_consent "choco install docker-desktop -y"
       choco install docker-desktop -y
       echo "→ Log out/in and start Docker Desktop."
       ;;
@@ -48,15 +69,18 @@ install_docker() {
 }
 
 install_compose() {
-  echo "-- Docker Compose not found: installing"
+  echo "-- Docker Compose not found"
   case "$OS" in
     linux)
+      require_install_consent "sudo apt-get update && sudo apt-get install -y docker-compose-plugin"
       sudo apt-get update && sudo apt-get install -y docker-compose-plugin
       ;;
     macos)
+      require_install_consent "brew install docker-compose"
       brew install docker-compose
       ;;
     windows)
+      require_install_consent "choco install docker-compose -y"
       choco install docker-compose -y
       ;;
     *)

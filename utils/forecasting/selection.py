@@ -291,13 +291,12 @@ def _baseline_residuals(
     """
     Return the in-sample residuals of a Naive forecaster — the reference
     benchmark for the Diebold-Mariano test.
+
+    We always fit a fresh ``NaiveForecaster`` regardless of whether one
+    is present in ``candidates``: refitting is O(n) and dropping the
+    branch removes a dead conditional that did the same work twice.
     """
     from utils.forecasting.models import NaiveForecaster  # noqa: PLC0415
 
-    if any(isinstance(c, NaiveForecaster) for c in candidates):
-        baseline = NaiveForecaster().fit(y, None)
-        return baseline.residuals
-    # Even if the user removed the Naive from their candidate list, we
-    # still want a baseline for DM. Fit a temporary one.
     baseline = NaiveForecaster().fit(y, None)
     return baseline.residuals

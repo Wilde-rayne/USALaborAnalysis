@@ -33,29 +33,6 @@ def emb_module():
     return importlib.import_module("utils.embeddings")
 
 
-class TestPreprocessForEmbedding:
-    def test_numeric_values_emit_sentence_per_entry(self, emb_module) -> None:
-        text = "Labor Force: 1500000; Population: 3150000; state: IA"
-        out = emb_module.preprocess_for_embedding(text, context_prefix="In Iowa,")
-        # 'state: IA' is non-numeric and must be dropped.
-        assert len(out) == 2
-        assert out[0] == "In Iowa, Labor Force reported 1500000 thousand jobs."
-        assert out[1] == "In Iowa, Population reported 3150000 thousand jobs."
-
-    def test_empty_input_returns_empty_list(self, emb_module) -> None:
-        assert emb_module.preprocess_for_embedding("", context_prefix="x") == []
-
-    def test_non_numeric_only_returns_empty_list(self, emb_module) -> None:
-        out = emb_module.preprocess_for_embedding("state: IA; period: M01")
-        assert out == []
-
-    def test_negative_and_decimal_values_pass_through(self, emb_module) -> None:
-        out = emb_module.preprocess_for_embedding("growth: -1.5; rate: 0.25")
-        assert len(out) == 2
-        assert "-1.5" in out[0]
-        assert "0.25" in out[1]
-
-
 class TestSplitTextIntoChunks:
     def test_short_text_returns_single_chunk(self, emb_module) -> None:
         out = emb_module._split_text_into_chunks("Iowa labor market is stable.")

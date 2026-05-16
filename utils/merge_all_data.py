@@ -3,10 +3,9 @@ import pandas as pd
 import logging
 import json
 
-# configure logger
+from .ontology import ONTOLOGY
+
 logger = logging.getLogger(__name__)
-if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
 # directories and constants
 RAW_DIR_LAUS = "data/raw/laus"
@@ -25,15 +24,6 @@ def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
     Read LAUS series files and return DataFrame with 
     (state, year, month, Labor_Force, Employment, Unemployment, Population).
     """
-    fips_map = {
-        "AL":"01","AK":"02","AZ":"04","AR":"05","CA":"06","CO":"08","CT":"09","DE":"10",
-        "FL":"12","GA":"13","HI":"15","ID":"16","IL":"17","IN":"18","IA":"19","KS":"20",
-        "KY":"21","LA":"22","ME":"23","MD":"24","MA":"25","MI":"26","MN":"27","MS":"28",
-        "MO":"29","MT":"30","NE":"31","NV":"32","NH":"33","NJ":"34","NM":"35","NY":"36",
-        "NC":"37","ND":"38","OH":"39","OK":"40","OR":"41","PA":"42","RI":"44","SC":"45",
-        "SD":"46","TN":"47","TX":"48","UT":"49","VT":"50","VA":"51","WA":"53","WV":"54",
-        "WI":"55","WY":"56"
-    }
     measure_map = {"006": "Labor_Force", "005": "Employment", "004": "Unemployment", "009": "Population"}
 
     df_all = pd.DataFrame()
@@ -44,7 +34,8 @@ def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
                 continue
             sid = str(df.at[0, "series_id"])
             fips = sid[5:7]
-            state = next((k for k,v in fips_map.items() if v==fips), None)
+            state_obj = ONTOLOGY.states_by_fips.get(fips)
+            state = state_obj.code if state_obj is not None else None
             if state not in states:
                 continue
             suffix = sid[-3:]

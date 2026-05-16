@@ -16,7 +16,6 @@ import requests
 import logging
 from .constants import API_KEY
 
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 API_URL   = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
@@ -75,7 +74,7 @@ def fetch_ces_data(states: List[str], start: int, end: int) -> None:
             "registrationkey": API_KEY,
         }
         try:
-            r = requests.post(API_URL, headers=HEADERS, data=json.dumps(payload))
+            r = requests.post(API_URL, headers=HEADERS, data=json.dumps(payload), timeout=30)
         except Exception as e:
             logger.error(f"[CES] Batch {b}: request failed – {e}")
             continue

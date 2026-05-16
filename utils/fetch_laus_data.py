@@ -4,6 +4,7 @@ Fetch LAUS data defined in data/laus_state_codes.json using BLS API.
 Each series is pulled for the full year range in YEAR_SLICE chunks and saved to data/raw/laus/*.txt.
 """
 import os
+import sys
 import json
 import math
 import requests
@@ -20,8 +21,6 @@ MONTHS_IN_YEAR = 12
 START_YEAR = 1996
 END_YEAR = 2024
 
-# Logging setup
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 
