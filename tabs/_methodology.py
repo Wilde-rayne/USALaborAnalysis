@@ -9,8 +9,10 @@ Surfaces, in one collapsible block per tab:
 4. Which BLS / Census / BEA / FRED datasets feed the pipeline.
 
 Every claim carries an inline citation that round-trips through
-``utils.citations``, so the list of 20+ references is defined once
-and used everywhere.
+``utils.citations``; the references panel surfaces the academic and
+methodological literature underpinning the dashboard's forecasting,
+retrieval, and software stack, with the canonical registry defined
+once in ``utils/citations.py`` and reused everywhere.
 """
 from __future__ import annotations
 
@@ -189,12 +191,15 @@ LFPR_DENOMINATOR_NOTE: str = (
     "excluded from the BLS denominator. We apply a **0.78** "
     "working-age civilian-noninstitutional correction (US average per "
     "BLS Handbook of Methods, ch. 1) so the displayed LFPR lands "
-    "within ~2 pp of the published BLS state LFPR. The uncorrected "
-    "ratio is preserved as `{state}_LFPR_RAW` in the panel. See "
-    "[`docs/methodology/lfpr_denominator.md`]"
+    "approximately ±2 pp on average of the published BLS state LFPR, "
+    "with up to ~3 pp residual error at the extremes (e.g., UT, ID, "
+    "ME, FL — whose civilian-noninstitutional share of total "
+    "population sits noticeably above or below the US average). The "
+    "uncorrected ratio is preserved as `{state}_LFPR_RAW` in the "
+    "panel. See [`docs/methodology/lfpr_denominator.md`]"
     "(docs/methodology/lfpr_denominator.md) for the full audit + the "
-    "per-state ACS-B23025-based fix that's queued for the next data "
-    "refresh."
+    "per-state ACS-B23025-based fix that is planned to become the "
+    "default denominator in Phase 2."
 )
 
 

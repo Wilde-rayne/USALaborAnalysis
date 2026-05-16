@@ -55,10 +55,16 @@ Wide columns:
 
 ### Residual error
 
-Using a uniform 0.78 leaves a state-specific residual error of
-**±2 pp** on average (RMSE vs published BLS state LFPR). UT and ID
-sit ~3 pp high because their CNI16+ share is closer to 0.74 than 0.78;
-ME and FL sit ~2 pp low for the opposite reason.
+Using a uniform 0.78 working-age fraction yields an **average residual
+error of approximately ±2 pp** (RMSE vs published BLS state LFPR), but
+the error widens to **up to ~3 pp at the extremes** for states whose
+true civilian-noninstitutional share diverges most from the US mean.
+UT and ID sit ~3 pp high because their CNI16+ share is closer to 0.74
+than 0.78; ME and FL sit ~2 pp low for the opposite reason. The ACS
+B23025-backed per-(state, year) denominator described in the next
+section is currently used only as a fallback path and is **planned to
+become the default in Phase 2** to compress the residual on these
+extreme-share states.
 
 ## What we'd do for sub-pp accuracy
 

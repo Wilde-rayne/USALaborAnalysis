@@ -36,10 +36,10 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
     Citation(
         key="hyndman_athanasopoulos_2018",
         authors="Hyndman, R. J., and Athanasopoulos, G.",
-        year=2018,
+        year=2021,
         title="Forecasting: Principles and Practice",
-        venue="OTexts (2nd ed.)",
-        url="https://otexts.com/fpp2/",
+        venue="OTexts (3rd ed.)",
+        url="https://otexts.com/fpp3/",
     ),
     Citation(
         key="holt_1957",
