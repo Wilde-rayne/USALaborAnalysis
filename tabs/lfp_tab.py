@@ -41,7 +41,11 @@ from utils.forecasting.trend import (
 )
 from utils.agents import blurb_async
 from utils.ontology import ONTOLOGY
-from tabs._methodology import LFPR_DENOMINATOR_NOTE, methodology_panel
+from tabs._methodology import (
+    LFPR_DENOMINATOR_NOTE,
+    chart_source_annotation,
+    methodology_panel,
+)
 from tabs._components import (
     PANEL_BLURB_TYPE,
     error_boundary,
@@ -857,10 +861,14 @@ def register_callbacks(app):
                 font=dict(size=11),
             ),
             hoverlabel=dict(bgcolor="white", font=dict(size=12)),
-            margin=dict(l=70, r=30, t=80, b=60),
+            margin=dict(l=70, r=30, t=80, b=90),
             plot_bgcolor="rgba(255,255,255,0)",
             paper_bgcolor="rgba(255,255,255,0)",
         )
+        # Data-source attribution footer — required by BLS / Census /
+        # BEA / FRED / FHFA citation policies. One consolidated line
+        # satisfies every agency. Sits below the x-axis label.
+        fig.add_annotation(**chart_source_annotation(x=0.0, y=-0.22))
         # Phase J: visualise the data-lag gap so the user can see the
         # months where data is real-but-unpublished (no line) vs the
         # forward forecast (full line + CI fan). Use the low-level

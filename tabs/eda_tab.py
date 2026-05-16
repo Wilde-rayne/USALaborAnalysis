@@ -38,6 +38,7 @@ from tabs._components import (
     render_blurb,
     tab_recap,
 )
+from tabs._methodology import chart_source_annotation
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +230,8 @@ def register_callbacks(app):
             yaxis_title="Value",
             template="plotly_white",
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            margin=dict(l=70, r=30, t=60, b=90),
+            annotations=[chart_source_annotation(x=0.0, y=-0.22)],
         )
 
         ts_view = {
@@ -253,6 +256,8 @@ def register_callbacks(app):
             yaxis_title="Percent change",
             template="plotly_white",
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            margin=dict(l=70, r=30, t=60, b=90),
+            annotations=[chart_source_annotation(x=0.0, y=-0.22)],
         )
 
         vol_view = {

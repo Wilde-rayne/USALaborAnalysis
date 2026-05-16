@@ -17,7 +17,14 @@ def get_env(name, default=None, cast=str):
 OLLAMA_CHAT_PATH  = os.getenv("OLLAMA_CHAT_PATH",  "/v1/chat/completions")
 OLLAMA_API_PATH   = OLLAMA_CHAT_PATH
 OLLAMA_URL       = get_env("OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL     = get_env("OLLAMA_MODEL", "llama2:chat")
+#: Default LLM used by the dashboard chat & blurb layer. Pinned to
+#: Llama 3.2 — the Llama 3.2 Community License governs this service's
+#: output (see ``docs/methodology/`` + the "Built with Llama" notice in
+#: README and About). Override via the ``OLLAMA_MODEL`` env var if you
+#: want to swap in a different chat model at runtime; do NOT downgrade
+#: the default to Llama 2 — its license has a 700M-MAU consent clause
+#: that 3.2 dropped.
+OLLAMA_MODEL     = get_env("OLLAMA_MODEL", "llama3.2:3b")
 #: HTTP read-timeout for individual Ollama calls. Single-CPU Ollama
 #: serializes inference, so a tab that fans out 4 panel blurbs queues
 #: behind earlier in-flight calls. 600 s (10 min) is generous enough

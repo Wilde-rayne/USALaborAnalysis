@@ -30,7 +30,7 @@ from tabs._components import (
     render_blurb,
     tab_recap,
 )
-from tabs._methodology import methodology_panel
+from tabs._methodology import chart_source_annotation, methodology_panel
 
 # Region options offered in the filter. Territories are grouped under
 # "Pacific" + "Caribbean" per the ontology; "All" shows whatever
@@ -568,7 +568,13 @@ def register_callbacks(app):
             xaxis_title="State",
             yaxis_title="Forecasted Employment",
             template="plotly_white",
+            margin=dict(l=70, r=30, t=80, b=110),
         )
+        # Data-source attribution footer — required by BLS / Census /
+        # BEA / FRED / FHFA citation policies. Mirrors the LFP tab so
+        # every forecast chart in the dashboard carries the same one-
+        # line source citation.
+        fig.add_annotation(**chart_source_annotation(x=0.0, y=-0.28))
 
         # ----- Build typed view_state payloads -----
         sector_label = sector.replace("_", " ")
