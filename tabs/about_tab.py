@@ -162,6 +162,63 @@ def render_layout():
                 open=False,
                 className="mb-4",
             ),
+            html.Hr(),
+            html.H5("Attribution & acknowledgments"),
+            html.Ul(
+                [
+                    html.Li(
+                        [
+                            html.B("Built with Llama."),
+                            " The chat and blurb layer runs Meta's "
+                            "Llama 3.2 (3B parameter chat variant) locally "
+                            "via Ollama. Use of the model is governed by the ",
+                            html.A(
+                                "Llama 3.2 Community License",
+                                href="https://www.llama.com/llama3_2/license/",
+                                target="_blank",
+                                rel="noopener",
+                            ),
+                            ".",
+                        ]
+                    ),
+                    html.Li(
+                        [
+                            html.B("Data attribution."),
+                            " Source: U.S. Bureau of Labor Statistics "
+                            "(CES, LAUS, JOLTS, QCEW, CPI); U.S. Census "
+                            "Bureau (ACS, PEP); U.S. Bureau of Economic "
+                            "Analysis (SAINC1); Federal Reserve Bank of "
+                            "St. Louis (FRED); Federal Housing Finance "
+                            "Agency (HPI). All data are in the public "
+                            "domain (17 USC §105) and are reproduced here "
+                            "with the standard agency citation framing.",
+                        ]
+                    ),
+                    html.Li(
+                        [
+                            html.B("Software stack."),
+                            " Embeddings: intfloat/e5-small-v2 "
+                            "(sentence-transformers, Apache-2.0). "
+                            "Forecasting: statsmodels (BSD-3); TensorFlow "
+                            "(Apache-2.0, opt-in LSTM only). UI: Dash + "
+                            "Plotly + dash-bootstrap-components. Agent "
+                            "harness: LangChain + DeepAgents (MIT).",
+                        ]
+                    ),
+                    html.Li(
+                        [
+                            html.B("AI assistance."),
+                            " Portions of this codebase were developed "
+                            "with assistance from Anthropic's Claude "
+                            "(Claude Code). All design decisions, "
+                            "scientific claims, dataset choices, and "
+                            "the final code state are author-authored "
+                            "and author-verified.",
+                        ]
+                    ),
+                ],
+                className="small text-muted",
+            ),
         ],
     )
 

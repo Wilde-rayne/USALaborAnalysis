@@ -214,7 +214,50 @@ _Last updated: 2025-05-01_
 
 ## ⚖️ License & Acknowledgments
 
-- Data from **BLS API**  
-- Embeddings via **Sentence-Transformers**  
-- Forecasting built on **TensorFlow** & **Spark**  
-- UI built with **Dash** & **Bootstrap**
+Code is released under the **MIT License** (see `LICENSE`). Third-party
+dependency licenses are aggregated in `NOTICE` — required by the
+Apache-2.0 deps (TensorFlow, Plotly, LangChain family, DeepAgents)
+before any binary redistribution.
+
+### Built with Llama
+
+The chat and blurb layer runs Meta's **Llama 3.2** (3B parameter chat
+variant) locally via Ollama. Use of the model is governed by the
+[Llama 3.2 Community License](https://www.llama.com/llama3_2/license/).
+The agent-refresh helper additionally runs Microsoft's **Phi-3** (MIT).
+Neither model's weights are redistributed in this repo — Ollama pulls
+them at runtime.
+
+### Data attribution
+
+Source: **U.S. Bureau of Labor Statistics** (CES, LAUS, JOLTS, QCEW,
+CPI); **U.S. Census Bureau** (ACS, PEP); **U.S. Bureau of Economic
+Analysis** (SAINC1 personal income); **Federal Reserve Bank of
+St. Louis** (FRED); **Federal Housing Finance Agency** (HPI). All
+underlying data are in the public domain (17 USC §105) and are
+reproduced here with the standard agency citation framing.
+
+### Software stack
+
+- **Embeddings** — `intfloat/e5-small-v2` (sentence-transformers,
+  Apache-2.0). In-process PyTorch; the prior Spark cluster has been
+  retired.
+- **Forecasting** — `statsmodels` (BSD-3) for ETS / ARIMA / ADF /
+  KPSS / Ljung-Box / Jarque-Bera / Diebold-Mariano; TensorFlow
+  (Apache-2.0) for the opt-in LSTM only.
+- **UI** — Dash + Plotly + dash-bootstrap-components.
+- **Agent harness** — LangChain + LangChain-Ollama + DeepAgents (MIT).
+- **Numerics** — NumPy, pandas, SciPy.
+
+The methodology panel on each forecast tab renders the corresponding
+peer-reviewed citation for every model, statistical test, and software
+library; the canonical registry is in `utils/citations.py`.
+
+### AI assistance
+
+Portions of this codebase were developed with the assistance of
+Anthropic's **Claude** (via Claude Code) for code authoring,
+refactoring, methodology critique, and citation curation. All design
+decisions, scientific claims, and dataset/methodology choices are
+human-authored and human-verified. This disclosure follows emerging
+academic and industry norms for AI-assisted authorship.
