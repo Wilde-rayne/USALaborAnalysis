@@ -108,6 +108,70 @@ DATA_SOURCE_KEYS: tuple[str, ...] = (
     "fhfa_hpi_handbook",
 )
 
+#: Short, one-line attribution string suitable for a chart caption /
+#: layout-annotation footer. Each upstream agency expects a "Source:
+#: ..." line under any figure that uses their data (BLS, Census, BEA,
+#: FRED, FHFA all publish a citation policy). One consolidated line
+#: keeps the footer visually compact while satisfying every policy.
+DATA_SOURCE_FOOTER: str = (
+    "Source: U.S. Bureau of Labor Statistics (CES, LAUS, JOLTS, QCEW, "
+    "CPI); U.S. Census Bureau (ACS, PEP); U.S. Bureau of Economic "
+    "Analysis; Federal Reserve Bank of St. Louis (FRED); Federal "
+    "Housing Finance Agency."
+)
+
+
+def chart_source_annotation(
+    *,
+    x: float = 0.0,
+    y: float = -0.18,
+    text: str = DATA_SOURCE_FOOTER,
+) -> dict:
+    """
+    Return a Plotly ``layout.annotations`` dict that renders the
+    standard "Source: ..." citation footer underneath a chart.
+
+    Add to a figure via either ``fig.add_annotation(**chart_source_annotation())``
+    or ``fig.update_layout(annotations=[chart_source_annotation()])``.
+    Keep the wording neutral and short; one consolidated line satisfies
+    BLS / Census / BEA / FRED / FHFA citation policies.
+    """
+    return dict(
+        text=text,
+        xref="paper",
+        yref="paper",
+        x=x,
+        y=y,
+        xanchor="left",
+        yanchor="top",
+        showarrow=False,
+        font=dict(size=10, color="rgba(80, 80, 80, 0.85)"),
+        align="left",
+    )
+
+
+#: Software / model attribution keys — surfaces the embedding model,
+#: the sentence-transformers library, the numeric/statistical stack,
+#: the agent-architecture antecedents, and the Llama 3.2 community
+#: license. Rendered as its own "Software & model attribution" block
+#: alongside the data sources so an auditor sees the same provenance
+#: layer for code that they see for data.
+SOFTWARE_ATTRIBUTION_KEYS: tuple[str, ...] = (
+    "wang_e5_2022",
+    "reimers_gurevych_2019",
+    "seabold_perktold_2010",
+    "harris_numpy_2020",
+    "mckinney_pandas_2010",
+    "pedregosa_sklearn_2011",
+    "abadi_tensorflow_2016",
+    "tukey_1977",
+    "akaike_1974",
+    "efron_1979",
+    "shinn_reflexion_2023",
+    "minsky_1986",
+    "llama3_license_2024",
+)
+
 
 # ---------------------------------------------------------------------------
 # Definitional caveats — surfaces as its own block on the LFP tab
@@ -128,8 +192,9 @@ LFPR_DENOMINATOR_NOTE: str = (
     "within ~2 pp of the published BLS state LFPR. The uncorrected "
     "ratio is preserved as `{state}_LFPR_RAW` in the panel. See "
     "[`docs/methodology/lfpr_denominator.md`]"
-    "(https://github.com/) for the full audit + the per-state "
-    "ACS-B23025-based fix that's queued for the next data refresh."
+    "(docs/methodology/lfpr_denominator.md) for the full audit + the "
+    "per-state ACS-B23025-based fix that's queued for the next data "
+    "refresh."
 )
 
 
@@ -174,6 +239,7 @@ def methodology_panel(
     forecast_notes: Iterable[MethodologyNote] = FORECAST_NOTES,
     diagnostic_notes: Iterable[MethodologyNote] = DIAGNOSTIC_NOTES,
     data_source_keys: Iterable[str] = DATA_SOURCE_KEYS,
+    software_keys: Iterable[str] = SOFTWARE_ATTRIBUTION_KEYS,
     open_by_default: bool = False,
     summary_text: str = "Methodology & references",
 ) -> html.Details:
@@ -186,11 +252,13 @@ def methodology_panel(
     forecast_notes = tuple(forecast_notes)
     diagnostic_notes = tuple(diagnostic_notes)
     data_source_keys = tuple(data_source_keys)
+    software_keys = tuple(software_keys)
 
     all_keys: set[str] = set()
     for n in forecast_notes + diagnostic_notes:
         all_keys.update(n.cites)
     all_keys.update(data_source_keys)
+    all_keys.update(software_keys)
 
     return html.Details(
         [
@@ -225,6 +293,47 @@ def methodology_panel(
                                 ]
                             )
                             for k in data_source_keys
+                        ],
+                        className="pi-method-list",
+                    ),
+                    html.H6("Software & model attribution"),
+                    html.P(
+                        [
+                            "Built with Llama (Meta's Llama 3.2 Community "
+                            "License — see ",
+                            html.A(
+                                "license",
+                                href="https://www.llama.com/llama3_2/license/",
+                                target="_blank",
+                                rel="noopener",
+                            ),
+                            "). The numeric, statistical, embedding, and "
+                            "agent-architecture references below underlie "
+                            "the implementation; software is cited "
+                            "alongside the seminal papers so reviewers can "
+                            "audit code provenance the same way they audit "
+                            "data provenance.",
+                        ],
+                        className="text-muted small",
+                    ),
+                    html.Ul(
+                        [
+                            html.Li(
+                                [
+                                    citation(k).title,
+                                    " — ",
+                                    html.A(
+                                        citation(k).venue,
+                                        href=citation(k).url,
+                                        target="_blank",
+                                        rel="noopener",
+                                    )
+                                    if citation(k).url
+                                    else citation(k).venue,
+                                    f" {render_inline(k)}",
+                                ]
+                            )
+                            for k in software_keys
                         ],
                         className="pi-method-list",
                     ),

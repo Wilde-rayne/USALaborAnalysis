@@ -10,10 +10,12 @@ from tabs._methodology import (
     DATA_SOURCE_KEYS,
     DIAGNOSTIC_NOTES,
     FORECAST_NOTES,
+    SOFTWARE_ATTRIBUTION_KEYS,
     MethodologyNote,
     _inline_cites_suffix,
     _render_notes,
     _render_references,
+    chart_source_annotation,
     methodology_panel,
 )
 
@@ -31,6 +33,19 @@ class TestNotes:
 
         for key in DATA_SOURCE_KEYS:
             assert key in CITATIONS
+
+    def test_every_software_attribution_key_is_known(self) -> None:
+        """Software / model attribution keys (Track C item 9) must all
+        resolve against the citation registry."""
+        from utils.citations import CITATIONS
+
+        for key in SOFTWARE_ATTRIBUTION_KEYS:
+            assert key in CITATIONS, key
+
+    def test_software_attribution_includes_built_with_llama_license(self) -> None:
+        """The Llama 3.2 Community License key is required by Meta's
+        license for any service that surfaces Llama-family output."""
+        assert "llama3_license_2024" in SOFTWARE_ATTRIBUTION_KEYS
 
 
 class TestInlineCitesSuffix:
@@ -89,7 +104,8 @@ class TestMethodologyPanel:
         assert len(panel.children) == 2
         body = panel.children[1]
         assert isinstance(body, html.Div)
-        # Section headers: Forecasting + Residual + Data sources + Refs.
+        # Section headers: Forecasting + Residual + Data sources +
+        # Software & model attribution + Refs.
         header_texts = [
             c.children
             for c in body.children
@@ -97,7 +113,7 @@ class TestMethodologyPanel:
         ]
         # Simpler check — count H6s.
         h6_count = sum(1 for c in body.children if isinstance(c, html.H6))
-        assert h6_count == 4
+        assert h6_count == 5
 
     def test_custom_summary_text(self) -> None:
         panel = methodology_panel(summary_text="Why you should trust this")
@@ -118,3 +134,29 @@ class TestMethodologyPanel:
         # with one li.
         ul = next(c for c in body.children if isinstance(c, html.Ul))
         assert len(ul.children) == 1
+
+
+class TestChartSourceAnnotation:
+    """Track C item 11 — every BLS/Census/BEA/FRED/FHFA chart gets a
+    consolidated 'Source:' caption per each agency's citation policy."""
+
+    def test_returns_plotly_annotation_dict(self) -> None:
+        ann = chart_source_annotation()
+        assert isinstance(ann, dict)
+        # Required plotly fields for a paper-anchored caption.
+        for required in ("text", "xref", "yref", "showarrow"):
+            assert required in ann, required
+        assert ann["xref"] == "paper"
+        assert ann["yref"] == "paper"
+        assert ann["showarrow"] is False
+
+    def test_default_text_names_every_agency(self) -> None:
+        text = chart_source_annotation()["text"]
+        for agency in ("Bureau of Labor Statistics", "Census Bureau",
+                       "Bureau of Economic Analysis", "FRED",
+                       "Federal Housing Finance Agency"):
+            assert agency in text, agency
+
+    def test_text_override(self) -> None:
+        ann = chart_source_annotation(text="Source: BLS only")
+        assert ann["text"] == "Source: BLS only"

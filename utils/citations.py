@@ -145,25 +145,25 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         key="bls_laus_handbook",
         authors="US Bureau of Labor Statistics",
         year=2024,
-        title="Local Area Unemployment Statistics — Technical Documentation",
+        title="Local Area Unemployment Statistics",
         venue="BLS Handbook of Methods",
-        url="https://www.bls.gov/lau/laumthd.htm",
+        url="https://www.bls.gov/opub/hom/lau/home.htm",
     ),
     Citation(
         key="bls_jolts_handbook",
         authors="US Bureau of Labor Statistics",
         year=2024,
-        title="Job Openings and Labor Turnover Survey (JOLTS) — Technical Note",
+        title="Job Openings and Labor Turnover Survey (JOLTS)",
         venue="BLS Handbook of Methods",
-        url="https://www.bls.gov/jlt/jlt_statedata.htm",
+        url="https://www.bls.gov/opub/hom/jlt/home.htm",
     ),
     Citation(
         key="bls_qcew_handbook",
         authors="US Bureau of Labor Statistics",
         year=2024,
-        title="Quarterly Census of Employment and Wages — Overview",
+        title="Quarterly Census of Employment and Wages",
         venue="BLS Handbook of Methods",
-        url="https://www.bls.gov/cew/overview.htm",
+        url="https://www.bls.gov/opub/hom/cew/home.htm",
     ),
     Citation(
         key="bls_cpi_handbook",
@@ -204,6 +204,119 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         title="House Price Index Technical Description",
         venue="FHFA",
         url="https://www.fhfa.gov/data/hpi/technical-documentation",
+    ),
+    # ----- Software / model attribution ----------------------------------
+    Citation(
+        key="reimers_gurevych_2019",
+        authors="Reimers, N., and Gurevych, I.",
+        year=2019,
+        title="Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks",
+        venue="Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing",
+        url="https://arxiv.org/abs/1908.10084",
+    ),
+    Citation(
+        key="wang_e5_2022",
+        authors="Wang, L., Yang, N., Huang, X., Jiao, B., Yang, L., Jiang, D., Majumder, R., and Wei, F.",
+        year=2022,
+        title="Text Embeddings by Weakly-Supervised Contrastive Pre-training",
+        venue="arXiv:2212.03533",
+        url="https://arxiv.org/abs/2212.03533",
+    ),
+    Citation(
+        key="seabold_perktold_2010",
+        authors="Seabold, S., and Perktold, J.",
+        year=2010,
+        title="Statsmodels: Econometric and Statistical Modeling with Python",
+        venue="Proceedings of the 9th Python in Science Conference",
+        url="https://conference.scipy.org/proceedings/scipy2010/seabold.html",
+    ),
+    Citation(
+        key="pedregosa_sklearn_2011",
+        authors=(
+            "Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V., "
+            "Thirion, B., Grisel, O., Blondel, M., Prettenhofer, P., "
+            "Weiss, R., Dubourg, V., Vanderplas, J., Passos, A., "
+            "Cournapeau, D., Brucher, M., Perrot, M., and Duchesnay, E."
+        ),
+        year=2011,
+        title="Scikit-learn: Machine Learning in Python",
+        venue="Journal of Machine Learning Research, 12, 2825–2830",
+        url="https://www.jmlr.org/papers/v12/pedregosa11a.html",
+    ),
+    Citation(
+        key="harris_numpy_2020",
+        authors=(
+            "Harris, C. R., Millman, K. J., van der Walt, S. J., "
+            "Gommers, R., Virtanen, P., Cournapeau, D., et al."
+        ),
+        year=2020,
+        title="Array programming with NumPy",
+        venue="Nature, 585(7825), 357–362",
+        url="https://doi.org/10.1038/s41586-020-2649-2",
+    ),
+    Citation(
+        key="mckinney_pandas_2010",
+        authors="McKinney, W.",
+        year=2010,
+        title="Data Structures for Statistical Computing in Python",
+        venue="Proceedings of the 9th Python in Science Conference, 56–61",
+        url="https://conference.scipy.org/proceedings/scipy2010/mckinney.html",
+    ),
+    Citation(
+        key="abadi_tensorflow_2016",
+        authors="Abadi, M., Barham, P., Chen, J., et al.",
+        year=2016,
+        title="TensorFlow: A System for Large-Scale Machine Learning",
+        venue="12th USENIX Symposium on Operating Systems Design and Implementation (OSDI 16)",
+        url="https://www.usenix.org/conference/osdi16/technical-sessions/presentation/abadi",
+    ),
+    Citation(
+        key="tukey_1977",
+        authors="Tukey, J. W.",
+        year=1977,
+        title="Exploratory Data Analysis",
+        venue="Addison-Wesley",
+    ),
+    Citation(
+        key="akaike_1974",
+        authors="Akaike, H.",
+        year=1974,
+        title="A new look at the statistical model identification",
+        venue="IEEE Transactions on Automatic Control, 19(6), 716–723",
+        url="https://doi.org/10.1109/TAC.1974.1100705",
+    ),
+    Citation(
+        key="efron_1979",
+        authors="Efron, B.",
+        year=1979,
+        title="Bootstrap Methods: Another Look at the Jackknife",
+        venue="The Annals of Statistics, 7(1), 1–26",
+        url="https://doi.org/10.1214/aos/1176344552",
+    ),
+    # ----- Agent architecture antecedents --------------------------------
+    Citation(
+        key="shinn_reflexion_2023",
+        authors="Shinn, N., Cassano, F., Berman, E., Gopinath, A., Narasimhan, K., and Yao, S.",
+        year=2023,
+        title="Reflexion: Language Agents with Verbal Reinforcement Learning",
+        venue="Advances in Neural Information Processing Systems 36 (NeurIPS 2023)",
+        url="https://arxiv.org/abs/2303.11366",
+    ),
+    Citation(
+        key="minsky_1986",
+        authors="Minsky, M.",
+        year=1986,
+        title="The Society of Mind",
+        venue="Simon & Schuster",
+    ),
+    # ----- Model licenses (non-academic but worth surfacing) -------------
+    Citation(
+        key="llama3_license_2024",
+        authors="Meta Platforms, Inc.",
+        year=2024,
+        title="Llama 3.2 Community License Agreement",
+        venue="Meta",
+        url="https://www.llama.com/llama3_2/license/",
     ),
 )
 
