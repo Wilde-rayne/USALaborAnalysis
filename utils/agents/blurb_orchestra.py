@@ -169,8 +169,10 @@ _CACHE_MAX_ENTRIES: int = 256
 
 def _trim_cache() -> None:
     """Drop the oldest half of the section cache when it overflows.
-    Cheap and good enough — there's no per-entry hit-count tracking
-    so we treat insertion order as a fair-enough proxy for staleness."""
+
+    Cheap and good enough — there's no per-entry hit-count tracking so
+    we treat insertion order as a fair-enough proxy for staleness.
+    """
     if len(_section_result_cache) <= _CACHE_MAX_ENTRIES:
         return
     keys = list(_section_result_cache.keys())
@@ -199,9 +201,13 @@ def _invariant_failures_for(view_state: dict) -> list[str]:
     failures: list[str] = []
     point = view_state.get("forecast_point")
     ci = view_state.get("forecast_ci") or [None, None]
-    ci_lo, ci_hi = (ci[0], ci[1]) if isinstance(ci, (list, tuple)) and len(ci) >= 2 else (None, None)
+    ci_lo, ci_hi = (
+        (ci[0], ci[1])
+        if isinstance(ci, (list, tuple)) and len(ci) >= 2
+        else (None, None)
+    )
     if point is not None and ci_lo is not None and ci_hi is not None:
-        if not (ci_lo <= point <= ci_hi):
+        if not ci_lo <= point <= ci_hi:
             failures.append(
                 f"point forecast {point} not contained in CI "
                 f"[{ci_lo}, {ci_hi}] — model bug; treat with caution"
@@ -216,7 +222,7 @@ def _invariant_failures_for(view_state: dict) -> list[str]:
             if width / last_val > 0.5:
                 failures.append(
                     f"95 % prediction interval is {width:.1f} "
-                    f"({width/last_val*100:.0f}% of the last observed "
+                    f"({width / last_val * 100:.0f}% of the last observed "
                     f"value) — model uncertainty is high, treat the "
                     f"point estimate as a midpoint not a target"
                 )
@@ -229,17 +235,15 @@ def _make_specialist(
     model: str | None = None,
     timeout: int = SPECIALIST_TIMEOUT_SECONDS,
 ) -> LaborAgent:
-    """
-    Build a short-lived specialist for a single panel section.
+    """Build a short-lived specialist :class:`LaborAgent` for one panel section.
 
-    All specialists default to the chat model (``OLLAMA_MODEL``).
-    The earlier two-model split (panels on phi3, recap on
-    llama3.2:3b) tripped the ``llama runner process has terminated``
-    error in single-CPU + 7.5 GB RAM containers — phi3's runner
-    OOM'd when llama3.2:3b was already resident, even with
-    ``OLLAMA_MAX_LOADED_MODELS=2``. One model means one runner, no
-    second-model load to fail; the chat model is also strictly the
-    higher-quality one for narrative work.
+    All specialists default to the chat model (``OLLAMA_MODEL``). The
+    earlier two-model split (panels on phi3, recap on llama3.2:3b)
+    tripped the "llama runner process has terminated" error in single-
+    CPU + 7.5 GB RAM containers — phi3's runner OOM'd when llama3.2:3b
+    was already resident, even with ``OLLAMA_MAX_LOADED_MODELS=2``. One
+    model means one runner, no second-model load to fail; the chat model
+    is also strictly the higher-quality one for narrative work.
     """
     if model is None:
         model = os.getenv(CHAT_MODEL_ENV, "llama3.2:3b")

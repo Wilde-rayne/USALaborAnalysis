@@ -10,14 +10,12 @@ everything the UI needs to explain the choice.
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from typing import Callable, Iterator, Sequence
 
 import numpy as np
 
 from utils.forecasting.base import (
     BaseForecaster,
-    ForecastDiagnostics,
     ForecastMetrics,
     ForecastResult,
 )
@@ -63,7 +61,29 @@ def compute_metrics(
     aic: float | None = None,
     bic: float | None = None,
 ) -> ForecastMetrics:
-    """Point-forecast scoring. All metrics averaged across the window."""
+    """Compute point-forecast metrics (MAE / RMSE / MAPE / sMAPE / bias).
+
+    Parameters
+    ----------
+    y_true, y_pred : numpy.ndarray
+        Equally-shaped 1-D arrays of actual and predicted values.
+    model : str
+        Forecaster name (carried into the result).
+    horizon : int
+        Forecast horizon length in steps.
+    aic, bic : float, optional
+        Information criteria from the fitted forecaster, if available.
+
+    Returns
+    -------
+    ForecastMetrics
+        Scored metrics for the window.
+
+    Raises
+    ------
+    ValueError
+        On a shape mismatch between ``y_true`` and ``y_pred``.
+    """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     if y_true.shape != y_pred.shape:
@@ -93,10 +113,9 @@ def compute_metrics(
 def _expanding_window_folds(
     n: int, horizon: int, n_folds: int
 ) -> Iterator[tuple[int, int]]:
-    """
-    Yield ``(train_end_exclusive, test_end_exclusive)`` index pairs.
+    """Yield ``(train_end_exclusive, test_end_exclusive)`` index pairs.
 
-    Fold k trains on ``y[:train_end_k]`` and scores against
+    Fold ``k`` trains on ``y[:train_end_k]`` and scores against
     ``y[train_end_k : test_end_k]``. Each successive fold grows the
     training set by one horizon.
     """
@@ -123,9 +142,9 @@ def _fold_metrics(
     horizon: int,
     n_folds: int,
 ) -> ForecastMetrics | None:
-    """
-    Run ``candidate`` through every backtest fold, return fold-averaged
-    metrics. Returns ``None`` if the candidate failed in every fold.
+    """Run ``candidate`` through every backtest fold and average the metrics.
+
+    Returns ``None`` if the candidate failed in every fold.
     """
     per_fold: list[ForecastMetrics] = []
     for fold_i, (tr_end, te_end) in enumerate(
@@ -178,10 +197,7 @@ def _fold_metrics(
 
 
 def _clone_kwargs(model: BaseForecaster) -> dict:
-    """
-    Extract the public, non-fitted attributes of ``model`` so we can
-    instantiate a sibling with the same hyperparameters.
-    """
+    """Return ``model``'s public, non-fitted attributes for sibling instantiation."""
     return {
         k: v
         for k, v in vars(model).items()
@@ -236,7 +252,8 @@ def select_forecaster(
     if candidates is None:
         candidates = default_candidates()
     if score is None:
-        score = lambda m: m.rmse  # noqa: E731 — RMSE by default
+        def score(m: ForecastMetrics) -> float:  # RMSE by default
+            return m.rmse
 
     y = np.asarray(y, dtype=float)
     if dates is None:
@@ -288,13 +305,12 @@ def select_forecaster(
 def _baseline_residuals(
     y: np.ndarray, candidates: list[BaseForecaster]
 ) -> np.ndarray | None:
-    """
-    Return the in-sample residuals of a Naive forecaster — the reference
-    benchmark for the Diebold-Mariano test.
+    """Return the in-sample residuals of a freshly fit :class:`NaiveForecaster`.
 
-    We always fit a fresh ``NaiveForecaster`` regardless of whether one
-    is present in ``candidates``: refitting is O(n) and dropping the
-    branch removes a dead conditional that did the same work twice.
+    These are the reference residuals for the Diebold-Mariano test. We
+    always fit a fresh ``NaiveForecaster`` regardless of whether one is
+    present in ``candidates``: refitting is O(n) and dropping the branch
+    removes a dead conditional that did the same work twice.
     """
     from utils.forecasting.models import NaiveForecaster  # noqa: PLC0415
 

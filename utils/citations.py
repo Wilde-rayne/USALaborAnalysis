@@ -15,7 +15,7 @@ Public API:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +103,10 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         key="jarque_bera_1980",
         authors="Jarque, C. M., and Bera, A. K.",
         year=1980,
-        title="Efficient tests for normality, homoscedasticity and serial independence of regression residuals",
+        title=(
+            "Efficient tests for normality, homoscedasticity and serial independence "
+            "of regression residuals"
+        ),
         venue="Economics Letters, 6(3), 255–259",
         url="https://doi.org/10.1016/0165-1765(80)90024-5",
     ),
@@ -211,12 +214,18 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         authors="Reimers, N., and Gurevych, I.",
         year=2019,
         title="Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks",
-        venue="Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing",
+        venue=(
+            "Proceedings of the 2019 Conference on Empirical Methods "
+            "in Natural Language Processing"
+        ),
         url="https://arxiv.org/abs/1908.10084",
     ),
     Citation(
         key="wang_e5_2022",
-        authors="Wang, L., Yang, N., Huang, X., Jiao, B., Yang, L., Jiang, D., Majumder, R., and Wei, F.",
+        authors=(
+            "Wang, L., Yang, N., Huang, X., Jiao, B., Yang, L., Jiang, D., "
+            "Majumder, R., and Wei, F."
+        ),
         year=2022,
         title="Text Embeddings by Weakly-Supervised Contrastive Pre-training",
         venue="arXiv:2212.03533",
@@ -326,7 +335,23 @@ CITATIONS: dict[str, Citation] = {c.key: c for c in _CITATIONS_LIST}
 
 
 def citation(key: str) -> Citation:
-    """Raise-on-miss helper — better than a silent None for rendering."""
+    """Look up a :class:`Citation` by key; raise ``KeyError`` if missing.
+
+    Parameters
+    ----------
+    key : str
+        Short id (``"box_jenkins_1970"``).
+
+    Returns
+    -------
+    Citation
+        The matching entry.
+
+    Raises
+    ------
+    KeyError
+        When ``key`` is not in :data:`CITATIONS`.
+    """
     try:
         return CITATIONS[key]
     except KeyError:
@@ -334,16 +359,15 @@ def citation(key: str) -> Citation:
 
 
 def render_inline(key: str) -> str:
-    """Compact in-text form: ``(Box & Jenkins, 1970)``."""
+    """Render the compact in-text form ``(Box & Jenkins, 1970)``."""
     c = citation(key)
     # Shorten authors: drop initials for the parenthetical form. "Box, G. E. P.,
     # and Jenkins, G. M." → "Box & Jenkins".
-    authors = _shorten_authors(c.authors)
-    return f"({authors}, {c.year})"
+    return f"({_shorten_authors(c.authors)}, {c.year})"
 
 
 def render_full(key: str) -> str:
-    """Full bibliography line: authors (year). Title. Venue."""
+    """Render the full bibliography line ``authors (year). Title. Venue.``"""
     c = citation(key)
     parts = [f"{c.authors} ({c.year}). {c.title}."]
     if c.venue:
@@ -354,19 +378,20 @@ def render_full(key: str) -> str:
 
 
 def _shorten_authors(authors: str) -> str:
-    """
-    Compact "Surname, Initials." style author strings to a short form:
+    """Compact a "Surname, Initials." author string into a short form.
 
-      "Holt, C. C."                                      → "Holt"
-      "Box, G. E. P., and Jenkins, G. M."                → "Box & Jenkins"
-      "Harvey, D., Leybourne, S., and Newbold, P."       → "Harvey et al."
-      "Kwiatkowski, D., Phillips, P. C. B., …, Shin, Y." → "Kwiatkowski et al."
-      "US Bureau of Labor Statistics"                    → "US Bureau of Labor Statistics"
+    Examples::
+
+        "Holt, C. C."                                      → "Holt"
+        "Box, G. E. P., and Jenkins, G. M."                → "Box & Jenkins"
+        "Harvey, D., Leybourne, S., and Newbold, P."       → "Harvey et al."
+        "Kwiatkowski, D., Phillips, P. C. B., …, Shin, Y." → "Kwiatkowski et al."
+        "US Bureau of Labor Statistics"                    → "US Bureau of Labor Statistics"
 
     The approach is a single regex that pulls surnames by looking for
-    ``Surname, I.`` patterns — works for all the academic-style
-    citations we carry and degrades to the raw string for institutional
-    authors (who have no trailing initial to match).
+    ``Surname, I.`` patterns — works for all the academic-style citations
+    we carry and degrades to the raw string for institutional authors
+    (who have no trailing initial to match).
     """
     import re  # noqa: PLC0415 — only needed here
 

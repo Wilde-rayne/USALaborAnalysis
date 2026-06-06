@@ -62,15 +62,34 @@ def fetch_cpi_regional(
     api_key: str | None = None,
     item_code: str = ITEM_ALL_ITEMS,
 ) -> int:
-    """
-    Download BLS regional CPI series and write per-region TXTs.
+    """Download BLS regional CPI series and write one TXT per region.
 
-    ``regions``: any subset of ``CPI_REGIONS`` keys ("0000", "0100",
-    "0200", "0300", "0400"). ``None`` fetches all five.
-
-    Returns the total number of ``(region, year, month)`` rows written.
     Individual year-batch failures are logged and skipped; the rest
     still write their files.
+
+    Parameters
+    ----------
+    regions : Iterable[str], optional
+        Subset of :data:`CPI_REGIONS` keys (``"0000"`` … ``"0400"``).
+        ``None`` fetches all five.
+    start_year, end_year : int, optional
+        Inclusive year range.
+    raw_dir : str, optional
+        Output directory (default :data:`RAW_DIR_DEFAULT`).
+    api_key : str, optional
+        BLS API key; falls back to :data:`API_KEY` when ``None``.
+    item_code : str, optional
+        BLS item code (default :data:`ITEM_ALL_ITEMS`).
+
+    Returns
+    -------
+    int
+        Total number of ``(region, year, month)`` rows written.
+
+    Raises
+    ------
+    ValueError
+        On unknown region codes or an invalid year range.
     """
     if regions is None:
         regions = list(CPI_REGIONS.keys())

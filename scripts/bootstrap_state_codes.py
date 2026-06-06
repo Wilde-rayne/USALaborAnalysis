@@ -51,26 +51,45 @@ def _sorted_state_codes(include_territories: bool) -> list[str]:
 
 
 def build_ces_codes(state_codes: Iterable[str]) -> dict[str, dict[str, str]]:
-    """{supersector_key: {state_code: SM series id}}."""
-    out: dict[str, dict[str, str]] = {}
-    for key in ONTOLOGY.supersectors:
-        out[key] = {
-            st: ONTOLOGY.ces_series_id(st, key) for st in state_codes
-        }
-    return out
+    """Build the CES code map.
+
+    Parameters
+    ----------
+    state_codes : Iterable[str]
+        USPS codes to expand.
+
+    Returns
+    -------
+    dict[str, dict[str, str]]
+        ``{supersector_key: {state_code: SM series id}}``.
+    """
+    return {
+        key: {st: ONTOLOGY.ces_series_id(st, key) for st in state_codes}
+        for key in ONTOLOGY.supersectors
+    }
 
 
 def build_laus_codes(state_codes: Iterable[str]) -> dict[str, dict[str, str]]:
-    """{measure_json_key: {state_code: LASST series id}}."""
-    out: dict[str, dict[str, str]] = {}
-    for json_key, measure_key in LAUS_MEASURE_MAP.items():
-        out[json_key] = {
-            st: ONTOLOGY.laus_series_id(st, measure_key) for st in state_codes
-        }
-    return out
+    """Build the LAUS code map.
+
+    Parameters
+    ----------
+    state_codes : Iterable[str]
+        USPS codes to expand.
+
+    Returns
+    -------
+    dict[str, dict[str, str]]
+        ``{measure_json_key: {state_code: LASST series id}}``.
+    """
+    return {
+        json_key: {st: ONTOLOGY.laus_series_id(st, measure_key) for st in state_codes}
+        for json_key, measure_key in LAUS_MEASURE_MAP.items()
+    }
 
 
 def main() -> None:
+    """Parse CLI args and regenerate the BLS state-code JSONs in-place."""
     parser = argparse.ArgumentParser(description="Regenerate BLS state code JSONs.")
     parser.add_argument(
         "--territories",

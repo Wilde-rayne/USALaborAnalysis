@@ -93,16 +93,24 @@ _PREAMBLE_MARKERS: tuple[str, ...] = tuple(
 
 
 def strip_preamble(text: str) -> str:
-    """
-    Remove a single leading preamble clause from ``text`` if one
-    matches :data:`_PREAMBLE_MARKERS`. Returns the cleaned text;
-    leaves the input unchanged when no marker matches.
+    """Strip a leading preamble clause from ``text`` if a marker matches.
 
-    Strategy: case-insensitive prefix match against the markers; on
-    a hit, drop everything up to and including the first sentence-
-    ending punctuation (``. : !``) or newline, then strip residual
-    whitespace. Conservative — only strips when we're sure it's a
-    preamble (matches the start, not somewhere in the middle).
+    Strategy: case-insensitive prefix match against
+    :data:`_PREAMBLE_MARKERS`; on a hit, drop everything up to and
+    including the first sentence-ending punctuation (``. : !``) or
+    newline, then strip residual whitespace. Conservative — only strips
+    when we're sure it's a preamble (matches the start, not somewhere
+    in the middle).
+
+    Parameters
+    ----------
+    text : str
+        Candidate blurb text.
+
+    Returns
+    -------
+    str
+        Cleaned text; the original input when no marker matches.
     """
     if not text:
         return text
@@ -194,12 +202,21 @@ class ReviewerAgent:
     # ------------------------------------------------------------------
     @staticmethod
     def quick_check(blurb: str) -> tuple[bool, str]:
-        """
-        Returns ``(looks_ok, reason)`` based on a few cheap rules.
+        """Run cheap heuristic checks on a candidate blurb.
 
         Catches preamble, error sentinels, suspiciously short output,
         and "no specific numbers" cases that are almost always bad.
         Falls through to the LLM reviewer for borderline candidates.
+
+        Parameters
+        ----------
+        blurb : str
+            Candidate text to inspect.
+
+        Returns
+        -------
+        tuple[bool, str]
+            ``(looks_ok, reason)`` — ``reason`` is empty when ``looks_ok``.
         """
         text = (blurb or "").strip()
         if not text:
@@ -226,12 +243,23 @@ class ReviewerAgent:
     # Stage 2 — LLM critic
     # ------------------------------------------------------------------
     def evaluate(self, blurb: str, facts: str) -> dict:
-        """
-        Submit the candidate blurb + the facts it was grounded in to
-        the LLM critic. Returns ``{"passed": bool, "feedback": str}``.
-        Falls back to ``passed=True`` if the response is malformed —
-        we'd rather ship a candidate the heuristic already cleared
-        than block on a parsing failure.
+        """Send the blurb to the LLM critic and parse its PASS/REVISE verdict.
+
+        Falls back to ``passed=True`` if the response is malformed — we'd
+        rather ship a candidate the heuristic already cleared than block
+        on a parsing failure.
+
+        Parameters
+        ----------
+        blurb : str
+            Candidate blurb to review.
+        facts : str
+            The grounding facts the blurb was expected to cite.
+
+        Returns
+        -------
+        dict
+            ``{"passed": bool, "feedback": str}``.
         """
         prompt = (
             f"Facts the analysis must ground in:\n{facts}\n\n"
@@ -256,10 +284,21 @@ class ReviewerAgent:
     # Composite — the orchestrator's main entry point
     # ------------------------------------------------------------------
     def review(self, blurb: str, facts: str) -> dict:
-        """
-        Two-stage review. Returns ``{"passed", "feedback", "stage"}``
-        so callers / progress messages can tell whether the
-        decision came from the cheap heuristic or the LLM critic.
+        """Run the two-stage (heuristic → LLM critic) review pipeline.
+
+        Parameters
+        ----------
+        blurb : str
+            Candidate blurb to review.
+        facts : str
+            Grounding facts the blurb was expected to cite.
+
+        Returns
+        -------
+        dict
+            ``{"passed", "feedback", "stage"}`` — ``stage`` is ``"quick"``
+            when the heuristic cleared the blurb, ``"llm"`` otherwise, so
+            progress messages can surface which arm decided.
         """
         ok, reason = self.quick_check(blurb)
         if ok:
@@ -336,11 +375,22 @@ class HolisticReviewer:
         section_texts: dict[str, str],
         section_facts: dict[str, str],
     ) -> dict:
-        """
-        Audit the full tab output. Returns ``{"passed", "target",
-        "feedback"}``: ``target`` is the section name to revise
-        when ``passed`` is False (defaults to ``"recap"`` if the
-        auditor's response is malformed but indicates a problem).
+        """Audit the full tab output for cross-section coherence.
+
+        Parameters
+        ----------
+        section_texts : dict[str, str]
+            Section name → final narrative text.
+        section_facts : dict[str, str]
+            Section name → grounding facts block the narrative cited.
+
+        Returns
+        -------
+        dict
+            ``{"passed", "target", "feedback"}`` — ``target`` is the
+            section name to revise when ``passed`` is False (defaults to
+            ``"recap"`` if the auditor's response is malformed but
+            indicates a problem).
         """
         prompt = self._build_audit_prompt(section_texts, section_facts)
         try:
@@ -441,13 +491,27 @@ class TileReviewer:
         figure_spec: object | None,
         facts: str,
     ) -> dict:
-        """
-        Audit a single ``(figure, blurb)`` tile.
+        """Audit a single ``(figure, blurb)`` tile for consistency.
 
-        Returns ``{"passed", "feedback"}``. When ``figure_spec`` is
-        ``None`` (the current default — no image-writer track is wired)
-        the method bias-passes since we have nothing to cross-check
-        against.
+        When ``figure_spec`` is ``None`` (the current default — no
+        image-writer track is wired) the method bias-passes since we
+        have nothing to cross-check against.
+
+        Parameters
+        ----------
+        section : str
+            Section name (used in the LLM prompt).
+        blurb : str
+            Narrative text to audit.
+        figure_spec : object or None
+            Description of the figure under the narrative.
+        facts : str
+            Grounding facts block.
+
+        Returns
+        -------
+        dict
+            ``{"passed", "feedback", "stage"}``.
         """
         if figure_spec is None:
             # Image-writer track is stubbed; fall through to PASS. The

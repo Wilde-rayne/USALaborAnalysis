@@ -22,7 +22,7 @@ point forecasts + 95% prediction intervals for every series.
 from __future__ import annotations
 
 import logging
-
+from collections import OrderedDict
 from datetime import datetime
 
 import numpy as np
@@ -31,21 +31,6 @@ import plotly.graph_objs as go
 from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
-from utils.constants import ALL_STATES
-from utils.data_pipeline import ensure_data
-from utils.forecasting import ForecastResult, select_forecaster
-from utils.forecasting.trend import (
-    TrendSummary,
-    rolling_statistics,
-    summarize_trend,
-)
-from utils.agents import blurb_async
-from utils.ontology import ONTOLOGY
-from tabs._methodology import (
-    LFPR_DENOMINATOR_NOTE,
-    chart_source_annotation,
-    methodology_panel,
-)
 from tabs._components import (
     PANEL_BLURB_TYPE,
     error_boundary,
@@ -54,15 +39,31 @@ from tabs._components import (
     render_blurb,
     tab_recap,
 )
+from tabs._methodology import (
+    LFPR_DENOMINATOR_NOTE,
+    chart_source_annotation,
+    methodology_panel,
+)
+from utils.agents import blurb_async
+from utils.constants import ALL_STATES
+from utils.data_pipeline import ensure_data
+from utils.forecasting import ForecastResult, select_forecaster
+from utils.forecasting.trend import (
+    TrendSummary,
+    rolling_statistics,
+    summarize_trend,
+)
+from utils.ontology import ONTOLOGY
 
 logger = logging.getLogger(__name__)
 
+
 def _current_year() -> int:
-    """
-    Indirection over ``datetime.now().year`` so tests around the
-    year-boundary (gap-anchor computation in ``update_lfp``) can
-    monkey-patch a fixed year without having to freezegun the whole
-    clock. Production callers always read the wall clock.
+    """Indirection over ``datetime.now().year`` for monkey-patchable tests.
+
+    The gap-anchor computation in ``update_lfp`` reads the calendar year;
+    tests substitute this function instead of freezegunning the whole
+    clock. Production callers always see the wall-clock year.
     """
     return datetime.now().year
 
@@ -75,9 +76,6 @@ def _current_year() -> int:
 # memory across its lifetime. 64 entries covers ~5 horizons × ~12
 # states × the two metrics without churn.
 # ---------------------------------------------------------------------------
-from collections import OrderedDict
-
-
 class _LRUCache(OrderedDict):
     """Bounded OrderedDict — newest insertion stays at the right end."""
 
@@ -120,11 +118,22 @@ METRIC_THRESHOLD_DIRECTION: dict[str, str] = {
 # Panel loading + derived columns
 # ---------------------------------------------------------------------------
 def _compute_unemployment_rate(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    The widened panel has ``{state}_Unemployment`` and
-    ``{state}_Labor_Force`` but not yet a precomputed rate. Derive it
-    inline: ``rate = 100 * unemployment / labor_force``. Keeps the
-    merger lean and lets the rate track any future data refresh.
+    """Add ``{state}_Unemployment_Rate`` columns derived from the LAUS panel.
+
+    The widened panel ships ``{state}_Unemployment`` and ``{state}_Labor_Force``
+    but not a pre-computed rate. We compute ``rate = 100 * unemployment /
+    labor_force`` per state, in-place. Keeps the merger lean and lets the
+    rate track any future data refresh.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Wide panel with ``{state}_Unemployment`` / ``{state}_Labor_Force``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The same DataFrame, with new ``{state}_Unemployment_Rate`` columns.
     """
     state_codes = {c[:2] for c in df.columns if c.endswith("_Unemployment")}
     for st in state_codes:
@@ -139,13 +148,12 @@ def _compute_unemployment_rate(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_lfp_panel() -> pd.DataFrame:
-    """Load and dedupe the panel, then add derived unemployment rate columns."""
+    """Load and dedupe the panel, then add derived unemployment-rate columns."""
     from utils.data_pipeline import load_panel_df
 
     ensure_data()
     df = load_panel_df()
-    df = _compute_unemployment_rate(df)
-    return df
+    return _compute_unemployment_rate(df)
 
 
 def _column_for(metric: str, state: str) -> str:
@@ -164,7 +172,7 @@ def _metric_label(metric: str) -> str:
 def _forecast_state(
     metric: str, state: str, years_ahead: int, df: pd.DataFrame
 ) -> ForecastResult | None:
-    """Fit the bakeoff for (metric, state, horizon). Caches across clicks."""
+    """Fit the bakeoff for ``(metric, state, horizon)``; caches across clicks."""
     key = (metric, state, years_ahead)
     if key in lfp_model_cache:
         return lfp_model_cache[key]
@@ -392,7 +400,7 @@ def _requirements_match_table(
         f"Requirement: {_metric_label(metric)} "
         f"{'≥' if direction == 'min' else '≤'} {threshold:.2f}{unit}"
         if threshold is not None
-        else f"Requirement: (none set — threshold left blank)"
+        else "Requirement: (none set — threshold left blank)"
     )
 
     return html.Div(
@@ -434,6 +442,7 @@ def _state_options() -> list[dict]:
 
 
 def render_layout():
+    """Build the LFP tab layout."""
     options = _state_options()
     default_focus = "IA" if "IA" in ALL_STATES else ALL_STATES[0]
     default_peers = [c for c in ("IL", "MN", "WI") if c in ALL_STATES and c != default_focus][:2]
@@ -614,6 +623,8 @@ def _trend_view_rows(
 
 
 def register_callbacks(app):
+    """Wire up the LFP tab's main and polling callbacks."""
+
     @app.callback(
         Output("lfp-output", "children"),
         Output("lfp-blurb-payload", "data"),
@@ -688,7 +699,9 @@ def register_callbacks(app):
         # actual observation.
         total_horizon = gap_months + months
         gap_dates = [last_date + pd.DateOffset(months=i + 1) for i in range(gap_months)]
-        forecast_dates = [last_date + pd.DateOffset(months=gap_months + i + 1) for i in range(months)]
+        forecast_dates = [
+            last_date + pd.DateOffset(months=gap_months + i + 1) for i in range(months)
+        ]
 
         # Colour palette: focus brand-blue, peers cycle through Plotly D3.
         palette = [

@@ -28,20 +28,26 @@ def error_boundary(
     *,
     extra_outputs: int = 0,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """
-    Decorator for Dash callback functions: catches uncaught exceptions
-    and returns a friendly alert instead of the raw Dash debug page.
+    """Wrap a Dash callback so uncaught exceptions render a friendly alert.
 
-    ``PreventUpdate`` and legitimate ``no_update`` paths are passed
-    through unchanged; only unexpected exceptions are wrapped.
-    ``fallback_id`` is baked into the rendered markup as a
-    ``data-error-of`` attribute so clientside code / tests can locate
-    the failed boundary.
+    ``PreventUpdate`` and legitimate ``no_update`` paths are passed through
+    unchanged; only unexpected exceptions are wrapped. ``fallback_id`` is
+    baked into the rendered markup as a ``data-error-of`` attribute so
+    clientside code or tests can locate the failed boundary.
 
-    Multi-output callbacks set ``extra_outputs`` to the number of
-    *additional* outputs beyond the primary alert. The boundary
-    returns ``(alert, None, None, …)`` so Dash's tuple-shape check
-    still passes after a failure.
+    Parameters
+    ----------
+    fallback_id : str, optional
+        Identifier rendered as ``data-error-of`` on the alert.
+    extra_outputs : int, optional
+        For multi-output callbacks, the number of *additional* outputs beyond
+        the primary alert. The boundary returns ``(alert, None, None, …)``
+        so Dash's tuple-shape check still passes after a failure.
+
+    Returns
+    -------
+    Callable
+        A decorator that wraps the callback function.
     """
 
     def _wrap(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -73,11 +79,22 @@ def error_boundary(
 # Components
 # --------------------------------------------------------------------------
 def status_pill(label: str, tone: str = "default", *, title: str | None = None) -> html.Span:
-    """
-    Tiny capsule badge used in the status strip.
+    """Render a tiny capsule badge used in the status strip.
 
-    ``tone`` picks the colour — one of ``"default"``, ``"ok"``,
-    ``"warn"``, ``"danger"``.
+    Parameters
+    ----------
+    label : str
+        Text rendered next to the dot.
+    tone : str, optional
+        Colour modifier — one of ``"default"``, ``"ok"``, ``"warn"``,
+        ``"danger"`` (default ``"default"``).
+    title : str, optional
+        Tooltip text rendered as the HTML ``title`` attribute.
+
+    Returns
+    -------
+    dash.html.Span
+        The badge element.
     """
     class_map = {
         "default": "pi-pill",
@@ -97,10 +114,23 @@ def status_pill(label: str, tone: str = "default", *, title: str | None = None) 
 
 
 def error_alert(message: str, *, fallback_id: str | None = None) -> html.Div:
-    """
-    Friendly error banner — replaces the raw Dash/Flask traceback page
-    when a callback blows up. The original exception is logged; the
-    user sees a short, non-scary message.
+    """Render a friendly error banner in place of the raw Dash traceback page.
+
+    The original exception is logged; the user sees a short, non-scary
+    message.
+
+    Parameters
+    ----------
+    message : str
+        Short human-readable description of the failure.
+    fallback_id : str, optional
+        Identifier rendered as the ``data-error-of`` attribute so tests
+        and clientside code can locate the boundary that failed.
+
+    Returns
+    -------
+    dash.html.Div
+        The alert element with ``role="alert"``.
     """
     attrs: dict[str, Any] = {
         "role": "alert",
@@ -124,14 +154,30 @@ def error_alert(message: str, *, fallback_id: str | None = None) -> html.Div:
 
 
 def loading_skeleton(*, lines: int = 3, width: str = "100%") -> html.Div:
-    """
-    Shimmer placeholder for not-yet-populated panels. Good for Dash's
-    ``dcc.Loading`` ``children=`` arg on first render.
+    """Render a shimmer placeholder for not-yet-populated panels.
 
-    The width pattern (100% / 90% / 70%) repeats so callers can ask
-    for any positive ``lines`` count; previously ``lines > 3``
-    silently truncated to three rows because ``(100, 90, 70)[:lines]``
-    is bounded by the tuple's length.
+    Good for Dash's ``dcc.Loading`` ``children=`` argument on first render.
+    The width pattern (100% / 90% / 70%) repeats so callers can ask for any
+    positive ``lines`` count; previously ``lines > 3`` silently truncated
+    to three rows because ``(100, 90, 70)[:lines]`` is bounded by the
+    tuple's length.
+
+    Parameters
+    ----------
+    lines : int, optional
+        Number of skeleton lines to render (default ``3``).
+    width : str, optional
+        CSS width for the outer wrapper (default ``"100%"``).
+
+    Returns
+    -------
+    dash.html.Div
+        The skeleton element.
+
+    Raises
+    ------
+    ValueError
+        If ``lines < 1``.
     """
     if lines < 1:
         raise ValueError(f"loading_skeleton expects lines >= 1, got {lines}")
@@ -171,8 +217,7 @@ def figure_panel(
     blurb_id: dict,
     placeholder: str = "Generating narrative analysis…",
 ) -> html.Div:
-    """
-    Interleaved tile: figure / table → caption → AI explanation.
+    """Render an interleaved figure → caption → AI explanation tile.
 
     The ``figure`` argument can be any Dash element — a ``dcc.Graph``,
     a Bootstrap table built elsewhere, or an ``html.Img`` for a
@@ -184,6 +229,24 @@ def figure_panel(
     Accessibility: the AI placeholder carries ``role="status"`` and
     ``aria-live="polite"`` so screen readers announce when the
     asynchronous narrative arrives without stealing focus.
+
+    Parameters
+    ----------
+    title : str
+        Tile header text.
+    figure : Any
+        Dash element rendered in the figure slot.
+    caption : str or None
+        Caption row text; ``None`` omits the caption.
+    blurb_id : dict
+        Pattern-matching id the deferred AI callback writes to.
+    placeholder : str, optional
+        Italic placeholder shown until the AI blurb arrives.
+
+    Returns
+    -------
+    dash.html.Div
+        The composed tile element.
     """
     children: list[Any] = [
         html.H6(title, className="pi-panel-title"),
@@ -211,11 +274,25 @@ def tab_recap(
     blurb_id: dict,
     placeholder: str = "Synthesising the recap…",
 ) -> html.Div:
-    """
-    End-of-tab synthesis section. Same deferred-fill pattern as
-    :func:`figure_panel`, but visually distinct (heavier title, no
-    figure) so the user reads it as a wrap-up rather than another
-    chart.
+    """Render the end-of-tab synthesis section.
+
+    Same deferred-fill pattern as :func:`figure_panel`, but visually
+    distinct (heavier title, no figure) so the user reads it as a wrap-up
+    rather than another chart.
+
+    Parameters
+    ----------
+    title : str, optional
+        Header text (default ``"Recap & deeper detail"``).
+    blurb_id : dict
+        Pattern-matching id the deferred AI callback writes to.
+    placeholder : str, optional
+        Italic placeholder shown until the AI blurb arrives.
+
+    Returns
+    -------
+    dash.html.Div
+        The composed recap element.
     """
     return html.Div(
         [
@@ -233,12 +310,22 @@ def tab_recap(
 
 
 def progress_strip(progress_id: str) -> html.Div:
-    """
-    Top-of-tab progress region. Driven by the polling callback that
-    streams panel completions in. Carries ``role="status"`` +
-    ``aria-live="polite"`` so screen readers announce each transition
-    ("generating panel 1 of 4" → "generated panel 1 of 4: forecast" →
-    …) without interrupting the user's reading focus.
+    """Render the top-of-tab progress region.
+
+    Driven by the polling callback that streams panel completions in.
+    Carries ``role="status"`` + ``aria-live="polite"`` so screen readers
+    announce each transition ("generating panel 1 of 4" → "generated
+    panel 1 of 4: forecast" → …) without interrupting reading focus.
+
+    Parameters
+    ----------
+    progress_id : str
+        DOM id for the inner span; the polling callback writes to this.
+
+    Returns
+    -------
+    dash.html.Div
+        The progress strip element.
     """
     return html.Div(
         html.Span("", id=progress_id, className="pi-progress-text"),
@@ -249,10 +336,22 @@ def progress_strip(progress_id: str) -> html.Div:
 
 
 def render_blurb(text: str, *, disclaimer: bool = True) -> html.Div:
-    """
-    Standard wrapper for AI-generated prose: Markdown body + optional
-    italic disclaimer. Centralised so every callback that fills a
-    panel-blurb placeholder uses the same shape.
+    """Wrap AI-generated prose with an optional italic disclaimer footer.
+
+    Centralised so every callback that fills a panel-blurb placeholder
+    uses the same shape.
+
+    Parameters
+    ----------
+    text : str
+        Markdown body rendered by ``dcc.Markdown``.
+    disclaimer : bool, optional
+        When True (default), appends the standard AI-narrative disclaimer.
+
+    Returns
+    -------
+    dash.html.Div
+        The composed blurb element.
     """
     children: list[Any] = [dcc.Markdown(text, className="pi-blurb-body")]
     if disclaimer:

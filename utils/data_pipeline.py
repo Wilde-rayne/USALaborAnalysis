@@ -33,14 +33,23 @@ OUTPUT_CSV  = Path(__file__).resolve().parents[1] / "data" / "all_data.csv"
 
 
 def load_panel_df(json_path: str | None = None) -> pd.DataFrame:
-    """
-    Load the merged panel JSON into a date-indexed, deduped DataFrame.
+    """Load the merged panel JSON into a date-indexed, deduped DataFrame.
 
     Centralised helper for the tabs (and ``app.py`` preload) so the
     "read JSON → MONTH_MAP → build date → drop duplicates" recipe lives
     in exactly one place. Callers can override ``json_path`` for tests;
     production should rely on the default (``OUTPUT_JSON``) which is
     monkey-patchable.
+
+    Parameters
+    ----------
+    json_path : str, optional
+        Override for the source JSON path; defaults to ``OUTPUT_JSON``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Wide panel sorted by date and deduplicated on date.
     """
     path = json_path or OUTPUT_JSON
     df = pd.read_json(path, orient="records")
@@ -53,8 +62,8 @@ def load_panel_df(json_path: str | None = None) -> pd.DataFrame:
     df.sort_values("date", inplace=True)
     # Collapse (state, year, month) rows to one per date — wide columns
     # are identical across the per-state rows that share a date.
-    df = df.drop_duplicates(subset="date")
-    return df
+    return df.drop_duplicates(subset="date")
+
 
 # How long a cached merge is considered fresh before we re-fetch.
 # Override with CACHE_MAX_AGE_SECONDS env var at container start.
@@ -62,12 +71,24 @@ DEFAULT_CACHE_MAX_AGE_SECONDS = 7 * 24 * 3600  # 7 days
 
 
 def cache_is_fresh(path: str | None = None, max_age_seconds: int | None = None) -> bool:
-    """
-    True if ``path`` exists and was modified within the freshness window.
+    """Return True if ``path`` exists and is younger than the freshness window.
 
-    ``path`` defaults to the module-level ``OUTPUT_JSON`` resolved at call
-    time (not at function-definition time) so tests can monkeypatch
-    ``data_pipeline.OUTPUT_JSON`` without re-importing.
+    ``path`` defaults to the module-level :data:`OUTPUT_JSON` resolved at
+    call time (not at function-definition time) so tests can
+    monkey-patch ``data_pipeline.OUTPUT_JSON`` without re-importing.
+
+    Parameters
+    ----------
+    path : str, optional
+        Override for the cache file path.
+    max_age_seconds : int, optional
+        Override the freshness window; defaults to the
+        ``CACHE_MAX_AGE_SECONDS`` env var or :data:`DEFAULT_CACHE_MAX_AGE_SECONDS`.
+
+    Returns
+    -------
+    bool
+        True if the cache file is present and fresh.
     """
     if path is None:
         path = OUTPUT_JSON
@@ -86,10 +107,25 @@ def ensure_data(
     *,
     force: bool = False,
 ) -> str:
-    """
-    Lazy data loader. Returns the path to the merged data file, fetching
-    from BLS/Census only when the cache is missing or stale. This is the
-    entry point reactive callers (Dash callbacks, app startup) should use.
+    """Lazily refresh the merged panel and return the path to it.
+
+    Fetches from BLS/Census only when the cache is missing, stale, or
+    ``force=True``. This is the entry point reactive callers (Dash
+    callbacks, app startup) should use.
+
+    Parameters
+    ----------
+    states : list[str], optional
+        State codes to fetch; defaults to ``ALL_STATES``.
+    start_year, end_year : int, optional
+        Inclusive year range; defaults to ``START_YEAR`` / ``END_YEAR``.
+    force : bool, optional
+        Skip the freshness check and always re-fetch.
+
+    Returns
+    -------
+    str
+        Absolute path to the merged JSON file.
     """
     from .constants import ALL_STATES, END_YEAR, START_YEAR
 
@@ -122,14 +158,20 @@ def ensure_data(
 
     return str(OUTPUT_JSON)
 
+
 def refresh_all(states: list[str], start_year: int, end_year: int):
-    """
-    Runs the full data pipeline:
-      1. Fetch CES data for given states and years
-      2. Fetch LAUS data for given states and years
-      3. Fetch Population data for given states and years
-      4. Merge all into a single dataset
-      5. Save to CSV and JSON
+    """Run the full data pipeline end-to-end.
+
+    Steps: fetch CES, fetch LAUS, fetch Population, merge into a single
+    DataFrame, and save to both CSV and JSON. Any exception is logged
+    and swallowed so a transient BLS outage doesn't crash the dashboard.
+
+    Parameters
+    ----------
+    states : list[str]
+        State codes to fetch.
+    start_year, end_year : int
+        Inclusive year range.
     """
     try:
         logger.info(f"[PIPE] Fetching data for states: {states} ({start_year}-{end_year})")
@@ -138,11 +180,12 @@ def refresh_all(states: list[str], start_year: int, end_year: int):
         fetch_population(states, start_year, end_year)
         logger.info("[PIPE] Merging data")
         merged_df = merge_all_data(states, start_year, end_year)
-        merged_df = merged_df.sort_values(["year","period"])
+        merged_df = merged_df.sort_values(["year", "period"])
         save_data(merged_df, OUTPUT_CSV, OUTPUT_JSON)
         logger.info(f"[PIPE] Data saved to {OUTPUT_CSV} and {OUTPUT_JSON}")
     except Exception as e:
         logger.error(f"[PIPE] Error in refresh_all: {e}")
+
 
 if __name__ == "__main__":
     import argparse

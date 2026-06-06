@@ -9,6 +9,7 @@ table underneath is the auditable receipt.
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 
 import numpy as np
 import pandas as pd
@@ -16,12 +17,6 @@ import plotly.graph_objs as go
 from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
-from utils.agents import blurb_async
-from utils.constants import ALL_STATES, SUPERSECTORS
-from utils.data_pipeline import ensure_data
-from utils.forecasting import ForecastResult, select_forecaster
-from utils.forecasting.models import default_candidates
-from utils.ontology import ONTOLOGY
 from tabs._components import (
     PANEL_BLURB_TYPE,
     error_boundary,
@@ -31,6 +26,12 @@ from tabs._components import (
     tab_recap,
 )
 from tabs._methodology import chart_source_annotation, methodology_panel
+from utils.agents import blurb_async
+from utils.constants import ALL_STATES, SUPERSECTORS
+from utils.data_pipeline import ensure_data
+from utils.forecasting import ForecastResult, select_forecaster
+from utils.forecasting.models import default_candidates
+from utils.ontology import ONTOLOGY
 
 # Region options offered in the filter. Territories are grouped under
 # "Pacific" + "Caribbean" per the ontology; "All" shows whatever
@@ -64,7 +65,6 @@ AGGREGATE_KEYS: frozenset[str] = frozenset({"Region Mean", "Region Median"})
 # Cache keyed by (sector, years). Value: {state: ForecastResult}. The
 # bounded LRU wrapper guarantees the worker process can't grow without
 # limit if a user explores many sector × horizon combinations.
-from collections import OrderedDict
 
 
 class _LRUCache(OrderedDict):
@@ -91,6 +91,7 @@ supersector_model_cache: _LRUCache = _LRUCache(maxsize=64)
 
 
 def _load_super_panel() -> pd.DataFrame:
+    """Ensure-data + load-panel helper used by the Super tab."""
     from utils.data_pipeline import load_panel_df
 
     ensure_data()
@@ -100,7 +101,7 @@ def _load_super_panel() -> pd.DataFrame:
 def _get_or_train_supersector(
     sector: str, years_ahead: int, df: pd.DataFrame
 ) -> dict[str, ForecastResult]:
-    """Cached per-state ForecastResult for (sector, horizon)."""
+    """Return cached per-state ``ForecastResult`` for ``(sector, horizon)``."""
     key = (sector, years_ahead)
     if key in supersector_model_cache:
         return supersector_model_cache[key]
@@ -140,19 +141,18 @@ def _get_or_train_supersector(
 
 def _selection_summary(entry: dict[str, ForecastResult]) -> html.Div:
     """Per-state table: which model won for each state + its RMSE."""
-    rows = []
-    for st, result in sorted(entry.items()):
-        rows.append(
-            html.Tr(
-                [
-                    html.Td(st),
-                    html.Td(result.name),
-                    html.Td(f"{result.metrics.rmse:,.1f}"),
-                    html.Td(f"{result.metrics.mae:,.1f}"),
-                    html.Td(f"{result.metrics.bias:+,.1f}"),
-                ]
-            )
+    rows = [
+        html.Tr(
+            [
+                html.Td(st),
+                html.Td(result.name),
+                html.Td(f"{result.metrics.rmse:,.1f}"),
+                html.Td(f"{result.metrics.mae:,.1f}"),
+                html.Td(f"{result.metrics.bias:+,.1f}"),
+            ]
         )
+        for st, result in sorted(entry.items())
+    ]
     return html.Div(
         [
             html.H6("Per-state winners"),
@@ -176,12 +176,29 @@ def _recommendation_panel(
     years_ahead: int,
     top_n: int = 3,
 ) -> html.Div:
-    """
-    "Where's the best place to site this sector?" card.
+    """Render the "Where's the best place to site this sector?" card.
 
-    Ranks states by forecasted employment, reports the top-N and
-    bottom-N relative to the median, and annotates each with its
-    percent delta so a reader can eyeball the spread.
+    Ranks states by forecasted employment, reports the top-N and bottom-N
+    relative to the median, and annotates each with its percent delta so
+    a reader can eyeball the spread.
+
+    Parameters
+    ----------
+    forecasts : dict[str, float]
+        Per-state forecast values plus the aggregate ``"Region Mean"`` /
+        ``"Region Median"`` rows (which are filtered out before ranking).
+    sector : str
+        Supersector key used in the heading.
+    years_ahead : int
+        Horizon for the heading.
+    top_n : int, optional
+        Number of top + bottom states to surface (default 3).
+
+    Returns
+    -------
+    dash.html.Div
+        The composed recommendation card, or an empty Div if fewer than
+        two per-state forecasts are available.
     """
     # Separate per-state forecasts from the aggregate rows the caller
     # also sticks into ``forecasts``.
@@ -254,10 +271,10 @@ def _recommendation_panel(
 def _apply_threshold(
     forecasts: dict[str, float], threshold_pct: float | None
 ) -> dict[str, float]:
-    """
-    Drop per-state entries whose forecast is below ``threshold_pct``% of
-    the median. Aggregate rows (``AGGREGATE_KEYS``) always pass. A
-    ``None`` or non-positive threshold disables the filter.
+    """Drop per-state entries whose forecast is below ``threshold_pct`` % of median.
+
+    Aggregate rows (``AGGREGATE_KEYS``) always pass. A ``None`` or
+    non-positive threshold disables the filter.
     """
     if not threshold_pct or threshold_pct <= 0:
         return forecasts
@@ -266,11 +283,11 @@ def _apply_threshold(
         return forecasts
     median = float(np.median(list(states_only.values())))
     cutoff = median * (threshold_pct / 100.0)
-    kept = {k: v for k, v in forecasts.items() if k in AGGREGATE_KEYS or v >= cutoff}
-    return kept
+    return {k: v for k, v in forecasts.items() if k in AGGREGATE_KEYS or v >= cutoff}
 
 
 def render_layout():
+    """Build the Supersector tab layout."""
     return html.Div(
         [
             html.H5("Supersector Employment Forecast"),
@@ -392,35 +409,50 @@ def _blurb_id(section: str) -> dict:
     return {"type": PANEL_BLURB_TYPE, "tab": "super", "section": section}
 
 
-def _apply_region_filter(entry: dict[str, ForecastResult], region: str) -> dict[str, ForecastResult]:
+def _apply_region_filter(
+    entry: dict[str, ForecastResult], region: str
+) -> dict[str, ForecastResult]:
     if region in (None, "__all__"):
         return entry
     allowed = {s.code for s in ONTOLOGY.states_in(region)}
     return {code: result for code, result in entry.items() if code in allowed}
 
 
+_SORT_KEYS: dict[str, tuple[str, bool]] = {
+    "value_asc":   ("value",    False),
+    "value_desc":  ("value",    True),
+    "growth_desc": ("growth",   True),
+    "ci_desc":     ("ci_width", True),
+    "ci_asc":      ("ci_width", False),
+}
+
+
 def _sort_states(
     state_values: dict[str, dict],
     mode: str,
 ) -> list[str]:
+    """Return state codes ordered by the requested sort ``mode``.
+
+    Parameters
+    ----------
+    state_values : dict[str, dict]
+        Maps state code → ``{"value", "growth", "ci_width", ...}``.
+    mode : str
+        One of ``"value_asc"``, ``"value_desc"`` (default), ``"growth_desc"``,
+        ``"ci_desc"``, ``"ci_asc"``.
+
+    Returns
+    -------
+    list[str]
+        State codes in the requested order.
     """
-    ``state_values`` maps state code → {"value", "growth", "ci_width"}.
-    Returns the state codes in the order requested.
-    """
-    if mode == "value_asc":
-        key = lambda c: state_values[c]["value"]; reverse = False  # noqa: E731
-    elif mode == "growth_desc":
-        key = lambda c: state_values[c]["growth"]; reverse = True  # noqa: E731
-    elif mode == "ci_desc":
-        key = lambda c: state_values[c]["ci_width"]; reverse = True  # noqa: E731
-    elif mode == "ci_asc":
-        key = lambda c: state_values[c]["ci_width"]; reverse = False  # noqa: E731
-    else:
-        key = lambda c: state_values[c]["value"]; reverse = True  # noqa: E731 — value_desc default
-    return sorted(state_values.keys(), key=key, reverse=reverse)
+    field, reverse = _SORT_KEYS.get(mode, _SORT_KEYS["value_desc"])
+    return sorted(state_values.keys(), key=lambda c: state_values[c][field], reverse=reverse)
 
 
 def register_callbacks(app):
+    """Wire up the Supersector tab's main and polling callbacks."""
+
     @app.callback(
         Output("super-output", "children"),
         Output("super-blurb-payload", "data"),
@@ -469,7 +501,8 @@ def register_callbacks(app):
             else:
                 preds, lower, upper = interval
             col = f"{st}_{sector}"
-            last_known = float(df[col].dropna().iloc[-1]) if col in df.columns and not df[col].dropna().empty else 0.0
+            col_series = df[col].dropna() if col in df.columns else pd.Series(dtype=float)
+            last_known = float(col_series.iloc[-1]) if not col_series.empty else 0.0
             forecast_val = float(preds[-1]) if len(preds) else 0.0
             growth = ((forecast_val - last_known) / last_known * 100.0) if last_known else 0.0
             state_summary[st] = {
@@ -762,7 +795,6 @@ def register_callbacks(app):
             if is_done
             else f"Generated {completed} of {total} panel(s); generating next…"
         )
-        return (*outs, progress_msg, is_done
-        )
+        return (*outs, progress_msg, is_done)
 
     # Chat lives in the global chat drawer now — registered in app.py.

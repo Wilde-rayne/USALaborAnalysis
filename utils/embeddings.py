@@ -41,7 +41,6 @@ except RuntimeError:
 from utils.constants import (
     LOCAL_EMBED_MODEL,
     MILESTONE_PATH,
-    MONTH_MAP,
     OUTPUT_JSON,
     README_PATH,
     REPORT_PATH,
@@ -95,17 +94,16 @@ _tokenizer = AutoTokenizer.from_pretrained(_model_name)
 # Internals
 # --------------------------------------------------------------------------
 def _get_st_model() -> SentenceTransformer:
-    """
-    Lazy-init the SentenceTransformer; reuse for every call.
+    """Lazy-init the SentenceTransformer and reuse for every call.
 
     Forces CPU explicitly because (a) the dashboard container has no
     GPU and (b) recent ``torch`` + ``sentence-transformers`` versions
-    sometimes load the model with weights on the ``meta`` device
-    when CUDA is *probed but unavailable*, then fail with
-    ``Cannot copy out of meta tensor; no data!`` on the first
-    ``encode()`` — silently breaking RAG retrieval. The post-load
-    warm-up forward pass surfaces any remaining materialization
-    issues at startup rather than mid-request.
+    sometimes load the model with weights on the ``meta`` device when
+    CUDA is *probed but unavailable*, then fail with "Cannot copy out
+    of meta tensor; no data!" on the first ``encode()`` — silently
+    breaking RAG retrieval. The post-load warm-up forward pass surfaces
+    any remaining materialization issues at startup rather than mid-
+    request.
     """
     global _st_model
     if _st_model is None:
@@ -148,17 +146,13 @@ def _tokenize_for_overlap(text: str) -> set[str]:
 
 
 def _apply_e5_prefix(role: str, text: str) -> str:
-    """
-    Prepend the e5-required role prefix to ``text``.
+    """Prepend the e5-required role prefix to ``text``; no-op for non-e5 models.
 
     ``intfloat/e5-small-v2`` (and the rest of the e5 family) is trained
     with an asymmetric retrieval objective: corpus chunks carry a
     ``"passage: "`` prefix and queries carry a ``"query: "`` prefix.
     Skipping the prefix degrades retrieval by 5-15 % per the model card
     (https://huggingface.co/intfloat/e5-small-v2).
-
-    No-ops for any non-e5 model (e.g. ``all-MiniLM-L6-v2``) so the
-    helper is safe to call unconditionally.
     """
     if role not in ("query", "passage"):
         raise ValueError(f"role must be 'query' or 'passage', got {role!r}")
@@ -184,14 +178,13 @@ _EMBED_CACHE_VERSION = "v2-e5prefix"
 
 
 def _combined_input_hash(paths: Sequence[str]) -> str:
-    """
-    Deterministic key over existing inputs — drives cache invalidation.
+    """Deterministic cache key over existing inputs + model name + contract version.
 
-    The active embedding model name AND the corpus-encoding contract
+    The active embedding model name and the corpus-encoding contract
     version are mixed in so that switching ``LOCAL_EMBED_MODEL`` (e.g.
-    e5-small-v2 → all-MiniLM-L6-v2) or rotating the prefix logic
-    cannot re-use stale vectors from a different setup that happen to
-    have the same dimensionality.
+    e5-small-v2 → all-MiniLM-L6-v2) or rotating the prefix logic cannot
+    re-use stale vectors from a different setup that happen to have the
+    same dimensionality.
     """
     h = hashlib.sha256()
     # Bind the cache to the model that produced it. Without this guard
@@ -223,16 +216,12 @@ def _split_text_into_chunks(text: str, chunk_size: int | None = None) -> List[st
 
 
 def _chunks_from_records(records: Iterable[dict]) -> Iterable[str]:
-    """
-    Turn the monthly panel into RAG-ready sentences via
-    :class:`utils.agents.sentence_rag.SentenceRAGBuilder`.
+    """Turn the monthly panel into RAG-ready chunks via :class:`SentenceRAGBuilder`.
 
     The builder emits three layers — deterministic facts, ontology-
     enriched per-state rankings, and per-(state, metric) trend
-    summaries — all without calling the LLM on the default path. The
-    optional ``polish=True`` flag routes each sentence through the
-    worker agent (phi3 by default) and is off here because embedding
-    rebuilds should be cheap.
+    summaries — all without calling the LLM. The chunks are then split
+    by the local tokenizer to stay under :data:`MAX_TOKENS`.
     """
     from utils.agents.sentence_rag import SentenceRAGBuilder  # noqa: PLC0415
 
@@ -263,8 +252,7 @@ def _collect_chunks() -> List[str]:
 
 
 def _embed_texts(texts: Sequence[str], role: str = "passage") -> np.ndarray:
-    """
-    Encode ``texts`` into a (N, dim) float32 array with L2-normalized rows.
+    """Encode ``texts`` into an ``(N, dim)`` float32 array with L2-normalized rows.
 
     ``role`` is the e5 prefix role — ``"passage"`` for corpus chunks
     (default) or ``"query"`` for a search-time embed call. The prefix
@@ -288,29 +276,31 @@ def _embed_texts(texts: Sequence[str], role: str = "passage") -> np.ndarray:
 
 
 def _embed_query(text: str) -> np.ndarray:
-    """
-    Encode a single query string into a (dim,) float32 vector.
+    """Encode a single query string into a ``(dim,)`` float32 vector.
 
     Always applies the ``"query: "`` prefix (no-op for non-e5 models)
     and L2-normalizes the result so downstream cosine reduces to a dot
     product against the L2-normalized corpus matrix.
     """
-    arr = _embed_texts([text], role="query")
-    return arr[0]
+    return _embed_texts([text], role="query")[0]
 
 
 # --------------------------------------------------------------------------
 # Public API
 # --------------------------------------------------------------------------
 def load_embeddings() -> tuple[List[str], np.ndarray]:
-    """
-    Build (or load from cache) the RAG chunk corpus + embeddings.
+    """Build or load the RAG chunk corpus and its embedding matrix.
 
     Mutates module globals ``_chunks``, ``_embs``, ``_chunk_tokens``.
     Both the corpus matrix and the lexical-overlap token sets are kept;
-    ``retrieve_context`` defaults to cosine similarity against ``_embs``
-    and only falls back to the token-overlap path when
+    :func:`retrieve_context` defaults to cosine similarity against
+    ``_embs`` and only falls back to the token-overlap path when
     ``USE_LEXICAL_RETRIEVAL`` is set or the embedding matrix is empty.
+
+    Returns
+    -------
+    tuple[list[str], numpy.ndarray]
+        ``(chunks, embeddings)`` — the embedding matrix is shape ``(N, dim)``.
     """
     global _chunks, _embs, _chunk_tokens
 
@@ -378,8 +368,7 @@ def load_embeddings() -> tuple[List[str], np.ndarray]:
 
 
 def _use_lexical_retrieval() -> bool:
-    """
-    True if the caller has opted *in* to the lexical-Jaccard fallback.
+    """Return True if ``USE_LEXICAL_RETRIEVAL`` opts in to the lexical fallback.
 
     The old code path was disabled because torch-vs-tensorflow native
     allocator contention crashed Gunicorn workers that had also trained
@@ -422,21 +411,34 @@ def _retrieve_lexical(
 
 
 def retrieve_context(query: str, top_k: int = 3, return_scores: bool = False):
-    """
-    Pick top-k relevant chunks via cosine similarity over the cached
-    SentenceTransformer embeddings.
+    """Return the top-``k`` corpus chunks for ``query`` via cosine retrieval.
 
     The query is prefixed with ``"query: "`` per the e5 model card and
     embedded once, then cosine-scored against the L2-normalized
     ``_embs`` matrix (cosine reduces to a dot product on normalized
-    inputs). Falls back to tokenizer-Jaccard scoring when:
+    inputs). Falls back to tokenizer-Jaccard scoring when
+    ``USE_LEXICAL_RETRIEVAL`` is truthy, ``_embs`` is missing/empty, or
+    the cosine path raises (defensive — RAG is best-effort).
 
-    - ``USE_LEXICAL_RETRIEVAL`` env var is truthy (manual escape hatch
-      for deployments where torch + tensorflow share a Gunicorn worker
-      and the native allocators fight — see history of this function);
-    - ``_embs`` is missing or empty (e.g. ``load_embeddings`` returned
-      no chunks);
-    - the cosine path raises (defensive — RAG is best-effort).
+    Parameters
+    ----------
+    query : str
+        User question; must be non-empty.
+    top_k : int, optional
+        Number of chunks to return (default 3).
+    return_scores : bool, optional
+        When True, return ``list[(chunk, score)]``; otherwise
+        ``"\\n\\n".join(chunks)``.
+
+    Returns
+    -------
+    list[tuple[str, float]] or str
+        Top-k chunks with or without scores per ``return_scores``.
+
+    Raises
+    ------
+    ValueError
+        When ``query`` is empty after stripping.
     """
     q = query.strip()
     if not q:
@@ -482,6 +484,25 @@ def retrieve_context(query: str, top_k: int = 3, return_scores: bool = False):
 
 
 def get_relevant_context(active_tab: str, top_k: int = 3) -> str:
+    """Return tab-aware retrieval context for the chat drawer.
+
+    Resolves the active tab id to a short keyword string and runs
+    :func:`retrieve_context`. RAG is best-effort here — any exception
+    is logged and an empty string returned so a failing embedding
+    pipeline can't break the chat drawer.
+
+    Parameters
+    ----------
+    active_tab : str
+        Tab id (``"eda"``, ``"lfp"``, ``"super"``, ``"about"``).
+    top_k : int, optional
+        Number of chunks to retrieve (default 3).
+
+    Returns
+    -------
+    str
+        Concatenated retrieval text, or ``""`` on failure / empty tab id.
+    """
     if not active_tab:
         return ""
     key = active_tab.strip().lower()

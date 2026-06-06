@@ -1,7 +1,9 @@
-import os
-import pandas as pd
-import logging
+"""Merge LAUS / population / CES (+ Phase E-F sources) into one wide panel."""
 import json
+import logging
+import os
+
+import pandas as pd
 
 from .ontology import ONTOLOGY
 
@@ -38,14 +40,25 @@ LFPR_WORKING_AGE_FRACTION: float = 0.78
 
 
 def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Read LAUS series files and return DataFrame with
-    (state, year, month, Labor_Force, Employment, Unemployment).
+    """Read LAUS series files into a ``(state, year, month, measure)`` frame.
 
     Population is NOT a LAUS state-level measure (the BLS LAUS suffix
     009 is not published per-state); it comes from Census PEP/ACS via
     :mod:`utils.fetch_population_data` and is joined separately by
-    :func:`merge_all_data` below.
+    :func:`merge_all_data`.
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes to keep.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format frame with ``Labor_Force``, ``Employment``, and
+        ``Unemployment`` columns.
     """
     # population comes from Census PEP/ACS via fetch_population_data.py
     measure_map = {"006": "Labor_Force", "005": "Employment", "004": "Unemployment"}
@@ -77,7 +90,11 @@ def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
     df_all = df_all[df_all["period"].str.startswith("M")]
     df_all["year"] = df_all["year"].astype(int)
     df_all["month"] = df_all["period"].str[1:].astype(int)
-    df_all = df_all[(df_all.year>=start) & (df_all.year<=end) & (df_all.state.isin(states))]
+    df_all = df_all[
+        (df_all.year >= start)
+        & (df_all.year <= end)
+        & (df_all.state.isin(states))
+    ]
 
     # Each measure file contributes a row with its own column populated and
     # the other measure columns as NaN. Collapse those per (state, year,
@@ -95,9 +112,19 @@ def read_laus_series(states: list, start: int, end: int) -> pd.DataFrame:
 
 
 def read_population(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Read POP_{ST}.txt files (Census fallback) and return DataFrame with
-    (state, year, month=1, Population).
+    """Read ``POP_{ST}.txt`` Census-fallback files into a (state, year, Pop) frame.
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes to keep.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``state``, ``year``, ``month=1``, ``Population``.
     """
     df_list = []
     for fn in os.listdir(RAW_DIR_LAUS):
@@ -112,27 +139,35 @@ def read_population(states: list, start: int, end: int) -> pd.DataFrame:
             df["state"] = st
             df["year"] = df["year"].astype(int)
             df["month"] = 1  # January
-            df_list.append(df[["state","year","month","Population"]])
+            df_list.append(df[["state", "year", "month", "Population"]])
     pop_df = pd.concat(df_list, ignore_index=True) if df_list else pd.DataFrame()
     if pop_df.empty:
         return pop_df
-    return pop_df[(pop_df.year>=start) & (pop_df.year<=end)]
+    return pop_df[(pop_df.year >= start) & (pop_df.year <= end)]
 
 
 def read_working_age_population(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Read ``WAP_{ST}.txt`` files written by
-    ``utils.fetch_working_age_population`` and return a DataFrame of
-    ACS B23025_001E ("Population 16 years and over") observations.
+    """Read ``WAP_{ST}.txt`` ACS B23025 working-age population files.
 
-    Returns an empty DataFrame if no WAP files exist — the merger
-    treats that as "fall back to the uniform 0.78 fraction", so this
-    layer is fully opt-in. Years between two known ACS releases are
-    linearly interpolated per state; years outside the ACS coverage
-    window are forward / backward-filled from the nearest available
-    year so every (state, year) the merger asks about gets a value.
+    Returns an empty DataFrame if no WAP files exist — the merger treats
+    that as "fall back to the uniform 0.78 fraction", so this layer is
+    fully opt-in. Years between two known ACS releases are linearly
+    interpolated per state; years outside the ACS coverage window are
+    forward / backward-filled from the nearest available year so every
+    (state, year) the merger asks about gets a value.
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes to keep.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``state``, ``year``, ``working_age_population``.
     """
-    import numpy as np  # noqa: PLC0415 — local import keeps top-level lean
 
     rows: list[dict] = []
     if not os.path.isdir(RAW_DIR_LAUS):
@@ -188,7 +223,7 @@ def read_working_age_population(states: list, start: int, end: int) -> pd.DataFr
 # can still join on (state, year, month) without missing rows.
 # ---------------------------------------------------------------------------
 def _broadcast_quarter_to_months(period: str) -> list[int]:
-    """``Q01`` → [1,2,3]; ``Q02`` → [4,5,6]; etc. Returns ``[]`` on bad input."""
+    """Map ``"Q01"`` → ``[1, 2, 3]``, etc.; return ``[]`` on bad input."""
     if not period or not period.startswith("Q"):
         return []
     try:
@@ -202,19 +237,30 @@ def _broadcast_quarter_to_months(period: str) -> list[int]:
 
 
 def read_qcew(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Read QCEW state-total files into a long DataFrame.
+    """Read QCEW state-total TXTs into a long ``(state, year, month, metric, value)`` frame.
 
-    File layout (per :mod:`utils.fetch_qcew_data`):
-        ``data/raw/qcew/QCEW_{ST}_{SUFFIX}.txt``
-        with ``SUFFIX`` in {EMP, TQW, AWW, EST} and period ``QNN``.
+    File layout (per :mod:`utils.fetch_qcew_data`)::
 
-    Returns columns ``(state, year, month, metric, value)`` where the
+        data/raw/qcew/QCEW_{ST}_{SUFFIX}.txt
+
+    with ``SUFFIX`` in ``{EMP, TQW, AWW, EST}`` and period ``QNN``. The
     quarterly value is broadcast forward into each of the three months
     of the quarter. The merger then pivots to ``{ST}_QCEW_{metric}``
     wide columns; ``metric`` is the human-readable name (e.g.
     ``AverageWeeklyWage``) rather than the 3-letter file suffix so
     downstream column names self-describe.
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes to keep.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format ``(state, year, month, metric, value)``.
     """
     if not os.path.isdir(RAW_DIR_QCEW):
         return pd.DataFrame()
@@ -260,19 +306,30 @@ def read_qcew(states: list, start: int, end: int) -> pd.DataFrame:
 
 
 def read_jolts(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Read JOLTS files into a long DataFrame keyed by (year, month).
+    """Read JOLTS national series and broadcast them across the requested states.
 
-    Caveat: ``utils.fetch_jolts_data`` defaults to NATIONAL JOLTS
-    series. State-level series ids exist (experimental program) but
-    aren't fetched by default. National rows are broadcast across all
-    ``states`` so each per-state row of the panel inherits the
-    national series — this is the standard pattern for national
-    macro covariates joined onto a per-state grid.
+    ``utils.fetch_jolts_data`` defaults to NATIONAL JOLTS series.
+    State-level series ids exist (experimental program) but aren't
+    fetched by default. National rows are broadcast across all
+    ``states`` so each per-state row of the panel inherits the national
+    series — the standard pattern for national macro covariates joined
+    onto a per-state grid.
 
     JOLTS series ids encode the metric in the last 3 characters:
     ``JOL`` (openings), ``HIL`` (hires), ``QUL`` (quits),
     ``LDL`` (layoffs/discharges), ``TSL`` (total separations).
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes; each receives a copy of the national series.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format ``(state, year, month, metric, value)``.
     """
     if not os.path.isdir(RAW_DIR_JOLTS):
         return pd.DataFrame()
@@ -322,24 +379,30 @@ def read_jolts(states: list, start: int, end: int) -> pd.DataFrame:
     # Broadcast to every state. The series is national; the join is
     # informational (every IA row sees the same national openings count
     # for that month).
-    out_rows: list[dict] = []
-    for st in states:
-        sub = national.copy()
-        sub["state"] = st
-        out_rows.append(sub)
-    if not out_rows:
+    if not states:
         return pd.DataFrame()
+    out_rows = [national.assign(state=st) for st in states]
     return pd.concat(out_rows, ignore_index=True)
 
 
 def read_cpi(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Read regional CPI files and broadcast each region's index back to
-    the states that belong to it (per ``ONTOLOGY.states_by_region``).
+    """Read regional CPI files and broadcast each region's index to its states.
 
-    Returns long format ``(state, year, month, metric, value)`` with
-    one metric: ``CPI_AllItems``. Useful as a deflator for any
-    dollar-denominated wage series joined later (BEA, QCEW total wages).
+    Returns long format ``(state, year, month, metric, value)`` with one
+    metric: ``CPI_AllItems``. Useful as a deflator for any dollar-
+    denominated wage series joined later (BEA, QCEW total wages).
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format ``(state, year, month, metric, value)``.
     """
     if not os.path.isdir(RAW_DIR_CPI):
         return pd.DataFrame()
@@ -392,20 +455,31 @@ def read_cpi(states: list, start: int, end: int) -> pd.DataFrame:
 
 
 def read_fred(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Read FRED per-state series into long format.
+    """Read FRED per-state series and broadcast non-monthly cadences to months.
 
     ``utils.fetch_fred_data`` writes ``FRED_<sid>.txt`` files with
     period codes ``M01..M12`` (monthly), ``Q01..Q04`` (quarterly), or
     ``A01`` (annual). Quarterly values are broadcast into the three
     months of the quarter; annual values are broadcast across all 12
-    months of the year — a coarse but honest join (the caller can
-    flag the column name, e.g. ``FRED_NGSP``, as annual-derived).
+    months of the year — a coarse but honest join (the caller can flag
+    the column name, e.g. ``FRED_NGSP``, as annual-derived).
 
-    We extract the state code from the series id using the FRED
-    indicator registry (``utils.fetch_fred_data.FRED_INDICATORS``):
-    most use ``{ST}{IND}`` (prefix) but MHI uses
-    ``MEHOINUS{ST}A646N`` (infix), so simple slicing isn't safe.
+    The state code is extracted via the FRED indicator registry
+    (``utils.fetch_fred_data.FRED_INDICATORS``): most ids use
+    ``{ST}{IND}`` (prefix) but MHI uses ``MEHOINUS{ST}A646N`` (infix),
+    so simple slicing isn't safe.
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format ``(state, year, month, metric, value)``.
     """
     if not os.path.isdir(RAW_DIR_FRED):
         return pd.DataFrame()
@@ -467,13 +541,24 @@ def read_fred(states: list, start: int, end: int) -> pd.DataFrame:
 
 
 def read_bea(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Read BEA per-state annual personal income files.
+    """Read BEA per-state annual personal-income files, broadcast across 12 months.
 
     File pattern: ``BEA_SAINC1_L<linecode>_<ST>.txt`` with one annual
     row per year. Each value is broadcast across all 12 months of the
     matching year — annual joins are inherently coarse, but a constant
     per-state per-year is the right semantic for this dataset.
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format ``(state, year, month, metric, value)``.
     """
     if not os.path.isdir(RAW_DIR_BEA):
         return pd.DataFrame()
@@ -513,9 +598,7 @@ def read_bea(states: list, start: int, end: int) -> pd.DataFrame:
 
 
 def _join_long_phase_ef(panel: pd.DataFrame, long_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Pivot a (state, year, month, metric, value) frame into
-    ``{ST}_{METRIC}`` wide columns and merge into ``panel``.
+    """Pivot a long Phase-E/F frame into ``{ST}_{METRIC}`` columns and merge.
 
     Used uniformly by the Phase E/F readers (QCEW, JOLTS, CPI, FRED,
     BEA) so column-naming and the join keys stay symmetric with the
@@ -540,31 +623,54 @@ def _join_long_phase_ef(panel: pd.DataFrame, long_df: pd.DataFrame) -> pd.DataFr
 
 
 def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
-    """
-    Merge LAUS, population, and CES data into a single wide DataFrame.
-    Proceeds even if some sources are missing (partial data).
+    """Merge LAUS, population, CES, and Phase-E/F sources into one wide panel.
+
+    Proceeds even if some sources are missing (partial data); each
+    reader is logged + skipped on failure so a single broken source
+    can't take down a refresh.
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes to build the per-state grid from.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Wide panel with ``state, year, month`` index columns plus the
+        long-format LAUS measures and ``{ST}_{measure}`` wide columns.
     """
     # fetch LAUS and population
     df_laus = read_laus_series(states, start, end)
     df_pop  = read_population(states, start, end)
 
     # standard grid
-    years = list(range(start, end+1))
-    months = list(range(1,13))
-    grid = pd.DataFrame([(st, y, m) for st in states for y in years for m in months],
-                        columns=["state","year","month"])
+    years = list(range(start, end + 1))
+    months = list(range(1, 13))
+    grid = pd.DataFrame(
+        [(st, y, m) for st in states for y in years for m in months],
+        columns=["state", "year", "month"],
+    )
 
     panel = grid.copy()
 
     # merge LAUS if available
     if not df_laus.empty:
-        panel = pd.merge(panel, df_laus, on=["state","year","month"], how="left")
+        panel = pd.merge(panel, df_laus, on=["state", "year", "month"], how="left")
     else:
         logger.warning("[MERGE] No LAUS data available - skipping LAUS merge.")
 
     # merge population
     if not df_pop.empty:
-        panel = pd.merge(panel, df_pop, on=["state","year","month"], how="left", suffixes=("_laus","_pop"))
+        panel = pd.merge(
+            panel,
+            df_pop,
+            on=["state", "year", "month"],
+            how="left",
+            suffixes=("_laus", "_pop"),
+        )
     else:
         logger.warning("[MERGE] No population data available - skipping population merge.")
         # Only backfill a Population column if LAUS didn't already supply one.
@@ -574,13 +680,15 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
     # consolidate population columns
     if "Population_laus" in panel.columns and "Population_pop" in panel.columns:
         panel["Population"] = panel["Population_laus"].fillna(panel["Population_pop"])
-        panel.drop(columns=["Population_laus","Population_pop"], inplace=True)
+        panel.drop(columns=["Population_laus", "Population_pop"], inplace=True)
     elif "Population_laus" in panel.columns:
         panel.rename(columns={"Population_laus": "Population"}, inplace=True)
 
     # propagate population
     if "Population" in panel.columns:
-        panel["Population"] = panel.groupby(["state","year"])["Population"].transform(lambda x: x.ffill().bfill())
+        panel["Population"] = panel.groupby(["state", "year"])["Population"].transform(
+            lambda x: x.ffill().bfill()
+        )
 
     # ---------------------------------------------------------------- *
     # Labor Force Participation Rate
@@ -683,23 +791,23 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
                 df["year"] = df["year"].astype(int)
                 df["month"] = df["period"].str[1:].astype(int)
                 df["value"] = pd.to_numeric(df["value"], errors="coerce")
-                df = df[(df.year>=start) & (df.year<=end)]
+                df = df[(df.year >= start) & (df.year <= end)]
                 for _, row in df.iterrows():
                     ces_rows.append({
                         "year": row["year"],
                         "month": row["month"],
                         "state": st,
-                        f"{st}_{sector}": row["value"]
+                        f"{st}_{sector}": row["value"],
                     })
         if ces_rows:
             df_ces = pd.DataFrame(ces_rows)
             ces_wide = df_ces.pivot_table(
-                index=["year","month"],
-                values=[c for c in df_ces.columns if c not in ["year","month","state"]],
-                aggfunc="first"
+                index=["year", "month"],
+                values=[c for c in df_ces.columns if c not in ("year", "month", "state")],
+                aggfunc="first",
             )
             ces_wide.reset_index(inplace=True)
-            panel = pd.merge(panel, ces_wide, on=["year","month"], how="left")
+            panel = pd.merge(panel, ces_wide, on=["year", "month"], how="left")
     else:
         logger.error(f"[MERGE] CES JSON not found: {CES_JSON}")
 
@@ -737,12 +845,17 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
 
 
 def save_data(df: pd.DataFrame, csv_path, json_path) -> None:
-    """
-    Save merged panel to CSV and JSON.
+    """Save the merged panel to both CSV and JSON files.
 
     Accepts ``str`` or :class:`pathlib.Path` for both paths; we coerce
-    to ``str`` before handing off to pandas / ``os.path`` to keep the
-    behavior identical on Python 3.6+.
+    to ``str`` before handing off to pandas and ``os.path``.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Wide panel to persist.
+    csv_path, json_path : str or pathlib.Path
+        Output paths; parent directory is created if absent.
     """
     csv_path = str(csv_path)
     json_path = str(json_path)

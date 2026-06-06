@@ -19,21 +19,18 @@ from utils.ontology import ONTOLOGY
 def _source_table() -> html.Table:
     """Render the ontology's DataSource catalog as a small reference table."""
     header = html.Thead(
-        html.Tr(
-            [html.Th(c) for c in ("Source", "API", "What it provides")]
-        )
+        html.Tr([html.Th(c) for c in ("Source", "API", "What it provides")])
     )
-    body_rows = []
-    for src in ONTOLOGY.sources.values():
-        body_rows.append(
-            html.Tr(
-                [
-                    html.Td([html.A(src.name, href=src.url, target="_blank")]),
-                    html.Td("✓" if src.api_available else "—"),
-                    html.Td(src.description),
-                ]
-            )
+    body_rows = [
+        html.Tr(
+            [
+                html.Td([html.A(src.name, href=src.url, target="_blank")]),
+                html.Td("✓" if src.api_available else "—"),
+                html.Td(src.description),
+            ]
         )
+        for src in ONTOLOGY.sources.values()
+    ]
     return html.Table(
         [header, html.Tbody(body_rows)],
         className="table table-sm table-striped",
@@ -41,6 +38,7 @@ def _source_table() -> html.Table:
 
 
 def render_layout():
+    """Build the About tab layout."""
     preload_msg = preload_state.preload_completed_at or "still warming up…"
     return html.Div(
         className="p-4",
@@ -224,5 +222,4 @@ def render_layout():
 
 
 def register_callbacks(app):
-    # Chat lives in the global chat drawer now — registered in app.py.
-    pass
+    """No-op: the About tab is pure content; chat lives in the global drawer."""

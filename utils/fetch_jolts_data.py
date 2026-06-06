@@ -62,12 +62,30 @@ def fetch_jolts(
     raw_dir: str = RAW_DIR_DEFAULT,
     api_key: str | None = None,
 ) -> int:
-    """
-    Download BLS JOLTS series and write one TXT per series id.
+    """Download BLS JOLTS series and write one TXT per series id.
 
-    ``series_ids``: any collection of valid BLS JOLTS series ids. When
-    ``None`` the national preset (openings / hires / quits / layoffs /
-    separations, seasonally adjusted, total nonfarm) is fetched.
+    Parameters
+    ----------
+    series_ids : Iterable[str], optional
+        Valid BLS JOLTS series ids. When ``None``, fetches the national
+        preset (:data:`NATIONAL_JOLTS_SERIES`).
+    start_year, end_year : int, optional
+        Inclusive year range (JOLTS starts 2000-12).
+    raw_dir : str, optional
+        Output directory (default :data:`RAW_DIR_DEFAULT`).
+    api_key : str, optional
+        BLS API key; falls back to :data:`API_KEY` when ``None``.
+
+    Returns
+    -------
+    int
+        Total number of ``(series, year, month)`` rows written.
+
+    Raises
+    ------
+    ValueError
+        On empty ``series_ids``, more than :data:`BLS_MAX_SERIES_PER_REQUEST`
+        ids, or an invalid year range.
     """
     if series_ids is None:
         series_ids = list(NATIONAL_JOLTS_SERIES)

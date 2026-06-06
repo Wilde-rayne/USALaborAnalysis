@@ -23,13 +23,9 @@ from datetime import datetime
 
 import pandas as pd
 import plotly.graph_objs as go
-from dash import html, dcc, Input, Output, State
+from dash import Input, Output, State, dcc, html
 from dash.exceptions import PreventUpdate
 
-from utils.agents import blurb_async
-from utils.constants import ALL_STATES, END_YEAR, MONTH_MAP, START_YEAR, YEARS
-from utils.data_pipeline import OUTPUT_JSON, ensure_data
-from utils.ontology import ONTOLOGY
 from tabs._components import (
     PANEL_BLURB_TYPE,
     error_boundary,
@@ -39,6 +35,10 @@ from tabs._components import (
     tab_recap,
 )
 from tabs._methodology import chart_source_annotation
+from utils.agents import blurb_async
+from utils.constants import ALL_STATES, END_YEAR, MONTH_MAP, START_YEAR, YEARS
+from utils.data_pipeline import OUTPUT_JSON, ensure_data
+from utils.ontology import ONTOLOGY
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ def _blurb_id(section: str) -> dict:
 
 
 def render_layout():
+    """Build the EDA / Overview tab layout."""
     return html.Div(
         [
             html.H5("Exploratory Data Analysis / Overview"),
@@ -61,7 +62,9 @@ def render_layout():
                     html.Ul(
                         [
                             html.Li([html.B("CES"), " = Current Employment Statistics (BLS)"]),
-                            html.Li([html.B("LAUS"), " = Local Area Unemployment Statistics (BLS)"]),
+                            html.Li(
+                                [html.B("LAUS"), " = Local Area Unemployment Statistics (BLS)"]
+                            ),
                             html.Li([html.B("LFPR"), " = Labor Force Participation Rate"]),
                             html.Li([html.B("ARIMA / ETS"), " = bake-off forecasting models"]),
                         ]
@@ -115,6 +118,8 @@ def render_layout():
 
 
 def register_callbacks(app):
+    """Wire up the EDA tab's metadata, main, and polling callbacks."""
+
     @app.callback(
         Output("eda-metadata", "children"),
         Input("eda-output", "children"),
@@ -243,13 +248,11 @@ def register_callbacks(app):
         }
 
         # ----- Volatility (YoY + rolling) figure + view_state -----
-        roll = df.set_index("date")[series_cols].rolling(12).mean()
         yoy = df.set_index("date")[series_cols].pct_change(12, fill_method=None).mul(100)
-        vol_traces: list = []
-        for col in series_cols:
-            vol_traces.append(
-                go.Scatter(x=yoy.index, y=yoy[col], mode="lines", name=f"{col} YoY %")
-            )
+        vol_traces = [
+            go.Scatter(x=yoy.index, y=yoy[col], mode="lines", name=f"{col} YoY %")
+            for col in series_cols
+        ]
         fig_vol = go.Figure(vol_traces).update_layout(
             title="Year-over-year % change",
             xaxis_title="Date",

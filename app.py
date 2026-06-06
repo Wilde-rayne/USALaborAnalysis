@@ -1,4 +1,4 @@
-# app.py
+"""Dash app entry point: navbar, status strip, tabs, preload thread, health endpoint."""
 import logging
 import os
 import secrets
@@ -62,26 +62,23 @@ def _warm_ollama() -> None:
 
 
 def _load_panel_df():
-    """Thin wrapper around ``utils.data_pipeline.load_panel_df`` for
-    backward-compatibility with callers inside this module."""
+    """Backward-compat thin wrapper around ``utils.data_pipeline.load_panel_df``."""
     from utils.data_pipeline import load_panel_df
 
     return load_panel_df()
 
 
 def _preload_lfp_models(df) -> None:
-    """
-    Pre-train the LFP bakeoff for the default focus state across the
-    five horizons. Cache key matches the I7 rewrite —
-    ``(metric, state_code, years_ahead)`` — so the first user click
-    after a ``PRELOAD_SCOPE=lfp`` boot hits a warm cache.
+    """Pre-train the LFP bakeoff for the headline focus state across five horizons.
 
-    The 'Midwest_LFPR' aggregate that this function used to compute is
-    no longer a thing on the LFP tab — that tab now does focus-state +
-    peer-states matching, with peers chosen by the user. Pre-training
-    every (metric × state × horizon) combination is too expensive
-    (~50 states × 2 metrics × 5 horizons × ~10 s/bakeoff = ~80 min);
-    the lazy on-click path covers that case fine. Here we only warm
+    Cache key matches the I7 rewrite — ``(metric, state_code, years_ahead)`` — so
+    the first user click after a ``PRELOAD_SCOPE=lfp`` boot hits a warm cache.
+
+    The ``Midwest_LFPR`` aggregate this function used to compute is no longer
+    used by the LFP tab — that tab now does focus-state + peer-states matching,
+    with peers chosen by the user. Pre-training every (metric × state × horizon)
+    combination is too expensive (~50 states × 2 metrics × 5 horizons × ~10 s
+    ≈ 80 min); the lazy on-click path covers that case fine. Here we only warm
     the headline series so the demo's first click is instant.
     """
     from tabs.lfp_tab import _column_for, lfp_model_cache
@@ -108,13 +105,12 @@ def _preload_lfp_models(df) -> None:
 
 
 def _preload_supersector_models(df) -> None:
-    """
-    Run the supersector bakeoff over every (sector, horizon, state) cell.
+    """Run the supersector bakeoff over every (sector, horizon, state) cell.
 
-    With the default Naive/SeasonalNaive/ETS candidate set each cell
-    takes ~3s; 9 sectors × 5 horizons × 12 states × 3s ≈ 27 min on
-    one CPU. Only runs under PRELOAD_SCOPE=full; otherwise the tabs
-    fill the cache lazily on click.
+    With the default Naive/SeasonalNaive/ETS candidate set each cell takes ~3 s;
+    9 sectors × 5 horizons × 12 states × 3 s ≈ 27 min on one CPU. Only runs
+    under ``PRELOAD_SCOPE=full``; otherwise the tabs fill the cache lazily on
+    click.
     """
     from tabs.super_tab import SUPERSECTORS, supersector_model_cache
     from utils.forecasting import select_forecaster
@@ -141,10 +137,7 @@ def _preload_supersector_models(df) -> None:
 
 
 def _background_preload() -> None:
-    """
-    Warm up only what PRELOAD_SCOPE asks for. Tabs handle their own
-    lazy-loading for anything skipped here.
-    """
+    """Warm up only what PRELOAD_SCOPE asks for; tabs lazy-load anything skipped."""
     started = datetime.now()
     logger.info(f"[PRELOAD] scope={PRELOAD_SCOPE} — starting warm-up")
 
@@ -186,13 +179,13 @@ threading.Thread(target=_background_preload, daemon=True).start()
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import html, dcc, Input, Output
+from dash import Input, Output, dcc, html
 
 tabs = {
-    'eda':   __import__('tabs.eda_tab',   fromlist=['render_layout','register_callbacks']),
-    'lfp':   __import__('tabs.lfp_tab',   fromlist=['render_layout','register_callbacks']),
-    'super': __import__('tabs.super_tab', fromlist=['render_layout','register_callbacks']),
-    'about': __import__('tabs.about_tab', fromlist=['render_layout','register_callbacks']),
+    "eda":   __import__("tabs.eda_tab",   fromlist=["render_layout", "register_callbacks"]),
+    "lfp":   __import__("tabs.lfp_tab",   fromlist=["render_layout", "register_callbacks"]),
+    "super": __import__("tabs.super_tab", fromlist=["render_layout", "register_callbacks"]),
+    "about": __import__("tabs.about_tab", fromlist=["render_layout", "register_callbacks"]),
 }
 
 app = dash.Dash(
@@ -269,9 +262,8 @@ def _status_children() -> list:
     ]
 
 
-from tabs._chat_drawer import render_drawer as _render_chat_drawer  # noqa: E402
 from tabs._chat_drawer import register_callbacks as _register_chat_drawer  # noqa: E402
-
+from tabs._chat_drawer import render_drawer as _render_chat_drawer  # noqa: E402
 
 app.layout = html.Div(
     [
@@ -325,6 +317,7 @@ def _refresh_status(_n):
     return _status_children()
 
 def register_all_callbacks(app):
+    """Register every tab's callbacks plus the global chat drawer."""
     for m in tabs.values():
         m.register_callbacks(app)
     _register_chat_drawer(app)

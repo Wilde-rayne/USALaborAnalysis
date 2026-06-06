@@ -55,14 +55,23 @@ _run_state: dict[str, dict] = {}
 
 
 def start_run(view_states: Mapping[str, dict | None]) -> str:
-    """
-    Allocate a run, kick off a daemon thread to fill its blurbs, and
-    return the run id. ``view_states`` is a tab-defined mapping from
-    section name to the typed view_state dict for that section — the
-    runner uses the caller's keys, so each tab can name its panels
-    however it wants ("forecast"/"trend" for LFP, "stats"/"timeseries"
-    for EDA, etc.). A ``None`` value marks a section that has nothing
-    to render (the polling layer treats that as "no panel context").
+    """Allocate a run, spawn a daemon thread to fill its blurbs, return the run id.
+
+    Parameters
+    ----------
+    view_states : Mapping[str, dict or None]
+        Tab-defined mapping from section name to the typed view_state dict
+        for that section. The runner uses the caller's keys verbatim, so
+        each tab can name its panels however it wants (``"forecast"`` /
+        ``"trend"`` for LFP, ``"stats"`` / ``"timeseries"`` for EDA, etc.).
+        A ``None`` value marks a section with nothing to render — the
+        polling layer treats that as "no panel context".
+
+    Returns
+    -------
+    str
+        Hex UUID identifying the run; pass to :func:`get_snapshot` or
+        :func:`is_done`.
     """
     run_id = uuid.uuid4().hex
     sections = list(view_states.keys())
@@ -91,14 +100,14 @@ def start_run(view_states: Mapping[str, dict | None]) -> str:
 
 
 def get_snapshot(run_id: str) -> dict | None:
-    """Lock-protected copy of a run's current state. ``None`` if unknown."""
+    """Return a lock-protected copy of a run's current state, or ``None``."""
     with _state_lock:
         state = _run_state.get(run_id)
         return dict(state) if state else None
 
 
 def is_done(run_id: str) -> bool:
-    """True once every panel has either filled or failed for this run."""
+    """Return True once every panel has either filled or failed for this run."""
     snap = get_snapshot(run_id)
     return bool(snap and snap.get("status") == "done")
 

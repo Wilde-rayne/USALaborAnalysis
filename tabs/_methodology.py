@@ -129,27 +129,37 @@ def chart_source_annotation(
     y: float = -0.18,
     text: str = DATA_SOURCE_FOOTER,
 ) -> dict:
-    """
-    Return a Plotly ``layout.annotations`` dict that renders the
-    standard "Source: ..." citation footer underneath a chart.
+    """Build a Plotly annotation dict that renders the source citation footer.
 
-    Add to a figure via either ``fig.add_annotation(**chart_source_annotation())``
+    Add to a figure via ``fig.add_annotation(**chart_source_annotation())``
     or ``fig.update_layout(annotations=[chart_source_annotation()])``.
     Keep the wording neutral and short; one consolidated line satisfies
     BLS / Census / BEA / FRED / FHFA citation policies.
+
+    Parameters
+    ----------
+    x, y : float, optional
+        Paper-anchored coordinates for the caption.
+    text : str, optional
+        Override the default consolidated source line.
+
+    Returns
+    -------
+    dict
+        Plotly ``layout.annotations`` entry suitable for ``add_annotation``.
     """
-    return dict(
-        text=text,
-        xref="paper",
-        yref="paper",
-        x=x,
-        y=y,
-        xanchor="left",
-        yanchor="top",
-        showarrow=False,
-        font=dict(size=10, color="rgba(80, 80, 80, 0.85)"),
-        align="left",
-    )
+    return {
+        "text": text,
+        "xref": "paper",
+        "yref": "paper",
+        "x": x,
+        "y": y,
+        "xanchor": "left",
+        "yanchor": "top",
+        "showarrow": False,
+        "font": {"size": 10, "color": "rgba(80, 80, 80, 0.85)"},
+        "align": "left",
+    }
 
 
 #: Software / model attribution keys — surfaces the embedding model,
@@ -224,10 +234,7 @@ def _render_notes(notes: Iterable[MethodologyNote]) -> html.Ul:
 
 
 def _render_references(keys: Iterable[str]) -> html.Ol:
-    """
-    Full bibliography rendering — numbered list with author-year sort.
-    Each entry gets a DOI / handbook link when we have one.
-    """
+    """Render the full bibliography as a numbered, author-year-sorted list."""
     items = []
     for key in sorted(set(keys), key=lambda k: (CITATIONS[k].year, CITATIONS[k].authors)):
         c = citation(key)
@@ -248,11 +255,29 @@ def methodology_panel(
     open_by_default: bool = False,
     summary_text: str = "Methodology & references",
 ) -> html.Details:
-    """
-    Render a collapsible methodology card. Drop into any tab that
-    exposes forecast output; defaults cover both the LFP and the
-    Super tabs — callers only need to override ``forecast_notes`` if
-    their methodology diverges.
+    """Render the collapsible methodology + references card.
+
+    Drop into any tab that exposes forecast output; defaults cover both
+    the LFP and the Super tabs — callers only need to override
+    ``forecast_notes`` if their methodology diverges.
+
+    Parameters
+    ----------
+    forecast_notes, diagnostic_notes : Iterable[MethodologyNote], optional
+        Bullet sets shown under "Forecasting & scoring" and "Residual &
+        series diagnostics", respectively.
+    data_source_keys, software_keys : Iterable[str], optional
+        Citation keys surfaced under "Data sources" and "Software & model
+        attribution".
+    open_by_default : bool, optional
+        When True, the ``<details>`` element renders open.
+    summary_text : str, optional
+        Text rendered inside the ``<summary>`` toggle.
+
+    Returns
+    -------
+    dash.html.Details
+        The composed panel element.
     """
     forecast_notes = tuple(forecast_notes)
     diagnostic_notes = tuple(diagnostic_notes)

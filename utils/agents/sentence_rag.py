@@ -59,7 +59,19 @@ class SentenceRAGBuilder:
     # Layer 1 — deterministic facts
     # ------------------------------------------------------------------
     def fact_sentences(self, records: Iterable[dict]) -> list[str]:
-        """One sentence per (state, year, tracked metric), yearly mean."""
+        """Emit one sentence per (state, year, tracked metric) using the yearly mean.
+
+        Parameters
+        ----------
+        records : Iterable[dict]
+            Long-form rows with at minimum ``state``, ``year``, and one of
+            :data:`_RAG_MEASURES`.
+
+        Returns
+        -------
+        list[str]
+            One fact sentence per (state, year, metric) cell with data.
+        """
         agg: dict[tuple[str, int], dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list)
         )
@@ -109,10 +121,20 @@ class SentenceRAGBuilder:
     # Layer 2 — ontology-enriched ranking + trend context
     # ------------------------------------------------------------------
     def ranking_sentences(self, records: Iterable[dict]) -> list[str]:
-        """
-        Per (year, metric), rank every state and emit a comparative sentence
-        for each. These feed the embedder with peer-group context, which is
-        what the chatbot most often needs.
+        """Emit per-state comparative ranking sentences per (year, metric).
+
+        These feed the embedder with peer-group context, which is what
+        the chatbot most often needs.
+
+        Parameters
+        ----------
+        records : Iterable[dict]
+            Long-form rows; see :meth:`fact_sentences`.
+
+        Returns
+        -------
+        list[str]
+            One sentence per (year, metric, state) ranking position.
         """
         # {(year, metric): {state_code: mean_value}}
         table: dict[tuple[int, str], dict[str, float]] = defaultdict(dict)
@@ -194,9 +216,17 @@ class SentenceRAGBuilder:
         )
 
     def trend_sentences(self, records: Iterable[dict]) -> list[str]:
-        """
-        For each (state, metric), describe the overall direction across the
-        observed span. One sentence per (state, metric, earliest vs latest).
+        """Emit one direction sentence per (state, metric) over the observed span.
+
+        Parameters
+        ----------
+        records : Iterable[dict]
+            Long-form rows; see :meth:`fact_sentences`.
+
+        Returns
+        -------
+        list[str]
+            One sentence per (state, metric) summarising earliest → latest.
         """
         # {(state, metric): {year: [values]}}
         years_by_state_metric: dict[tuple[str, str], dict[int, list[float]]] = defaultdict(
@@ -248,7 +278,7 @@ class SentenceRAGBuilder:
     # Top-level
     # ------------------------------------------------------------------
     def build_corpus(self, records: Iterable[dict]) -> list[str]:
-        """Deterministic facts + ontology ranks + trends."""
+        """Return the concatenation of facts, rankings, and trend sentences."""
         # Materialize the records once — each layer wants to iterate.
         records_list = list(records)
         return (
@@ -261,20 +291,28 @@ class SentenceRAGBuilder:
     # View-state rendering
     # ------------------------------------------------------------------
     def render_view_sentences(self, view_state: dict) -> list[str]:
-        """
-        Render an on-screen panel's ``view_state`` into ontology-aware
-        natural-language sentences.
+        """Render an on-screen panel's ``view_state`` into ontology-aware sentences.
 
-        This is the grounding layer for ``BlurbAgent.explain_view`` —
-        the AI never sees the raw key/value dict; it sees prose tagged
-        with state, region, measure, and source so its narrative stays
+        This is the grounding layer for ``BlurbAgent.explain_view`` — the
+        AI never sees the raw key/value dict; it sees prose tagged with
+        state, region, measure, and source so its narrative stays
         on-rails. Sentences from this function are also a natural input
         to the embedding store: tag them with ``view_state['_kind']``
         and ``focus_state`` to retrieve later from the chat drawer.
 
-        Dispatches on ``view_state['_kind']``; an unknown kind falls
-        back to a flat ``key: value`` rendering so a forgotten kind
-        still produces *something* (the AI just gets a dumber prompt).
+        Dispatches on ``view_state['_kind']``; an unknown kind falls back
+        to a flat ``key: value`` rendering so a forgotten kind still
+        produces *something* (the AI just gets a dumber prompt).
+
+        Parameters
+        ----------
+        view_state : dict
+            Typed payload emitted by a tab callback.
+
+        Returns
+        -------
+        list[str]
+            Non-empty sentences ready for the embedder / specialist prompt.
         """
         kind = view_state.get("_kind", "generic")
         renderer = {
@@ -305,7 +343,9 @@ class SentenceRAGBuilder:
         data_lag = vs.get("data_lag_months") or 0
         forecast = vs.get("forecast_point")
         ci = vs.get("forecast_ci") or [None, None]
-        ci_lo, ci_hi = (ci[0], ci[1]) if isinstance(ci, (list, tuple)) and len(ci) >= 2 else (None, None)
+        ci_lo, ci_hi = (
+            (ci[0], ci[1]) if isinstance(ci, (list, tuple)) and len(ci) >= 2 else (None, None)
+        )
         model = vs.get("winning_model")
         rmse = vs.get("rmse")
         peers = vs.get("peer_states") or []
@@ -762,10 +802,11 @@ _default_builder: SentenceRAGBuilder | None = None
 
 
 def default_rag_builder() -> SentenceRAGBuilder:
-    """
-    Lazy singleton — the per-call view-state renderers are stateless
-    apart from the ontology pointer, so re-instantiating per blurb
-    just rebuilds the measure dict for nothing.
+    """Return the lazy module-level :class:`SentenceRAGBuilder` singleton.
+
+    The per-call view-state renderers are stateless apart from the
+    ontology pointer, so re-instantiating per blurb just rebuilds the
+    measure dict for nothing.
     """
     global _default_builder
     if _default_builder is None:
