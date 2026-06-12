@@ -3,7 +3,7 @@ BlurbAgent — narrative blurb generator for the tab UIs.
 
 Sits one layer above :class:`utils.agents.base.LaborAgent`: callers
 pass structured arguments ("measure = LFPR, horizon = 2 years,
-historic = [...], forecast = [...], winning model = ets"), the agent
+historic = [...], forecast = [...], selected model = ets"), the agent
 turns them into a focused 3-5 sentence narrative.
 
 Why a class rather than free functions? Each BlurbAgent instance
@@ -14,7 +14,7 @@ touching the callers.
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from utils.agents.base import LaborAgent
 from utils.agents.ollama import chat_agent
@@ -63,7 +63,7 @@ class BlurbAgent:
         ``entity`` is a user-facing label ("Iowa", "the Midwest"),
         ``measure`` is the ontology-level measure key (e.g. "LFPR"),
         ``horizon_months`` is the forecast length, ``model_name`` is
-        the winning bakeoff entry ("ets"), and ``diagnostics_summary``
+        the bake-off-selected model ("ets"), and ``diagnostics_summary``
         is a short string to glue into the prompt (e.g. the ADF/DM
         line).
         """
@@ -99,8 +99,8 @@ class BlurbAgent:
 
         ``by_entity`` maps a label ("IA", "Midwest Mean") to the end-of-
         horizon forecast value. ``winners`` optionally maps label →
-        per-entity winning model name so the blurb can mention the
-        model mix.
+        the per-entity selected model name so the blurb can mention
+        the model mix.
         """
         try:
             readable_measure = ONTOLOGY.measure(measure).name

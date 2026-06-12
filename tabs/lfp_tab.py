@@ -295,12 +295,24 @@ def _model_rationale_table(col_label: str, result: ForecastResult) -> html.Div:
             ),
             html.Div(
                 html.Small(
+                    "Each model repeatedly forecast past months it was not "
+                    "fitted on (three backtest rounds, scores averaged). "
+                    "★ marks the selected model — lowest RMSE (typical "
+                    "forecast miss; smaller is better).",
+                    className="text-muted",
+                ),
+                className="mb-2",
+            ),
+            html.Div(
+                html.Small(
                     f"Diagnostics — ADF p={_fmt_p(d.adf_pvalue)} · "
                     f"KPSS p={_fmt_p(d.kpss_pvalue)} · "
                     f"Ljung-Box p={_fmt_p(d.ljungbox_pvalue)} · "
                     f"Jarque-Bera p={_fmt_p(d.jarquebera_pvalue)} · "
-                    f"Diebold-Mariano p={_fmt_p(d.dm_pvalue_vs_baseline)} "
-                    "(vs naive; negative DM stat ⇒ winner beats baseline)",
+                    f"Diebold-Mariano stat={_fmt_p(d.dm_stat_vs_baseline)}, "
+                    f"p={_fmt_p(d.dm_pvalue_vs_baseline)} "
+                    "(selected model vs naive, compared on in-sample fit "
+                    "errors; negative stat ⇒ the selected model fits better)",
                     className="text-muted",
                 ),
                 className="mb-3",
@@ -453,9 +465,11 @@ def render_layout():
                 "Pick a focus state plus peers, choose the metric and a "
                 "requirement threshold, and the forecast will highlight which "
                 "states clear the bar at the end of your horizon. Each state "
-                "runs a Naive / Seasonal-Naive / Holt-Winters / ARIMA bakeoff "
-                "and the chart shows the winning model's point forecast with "
-                "a 95 % prediction interval.",
+                "runs a bake-off of four models (Naive / Seasonal-Naive / "
+                "Holt-Winters / ARIMA): each model forecasts past months it "
+                "was not fitted on, and the one with the lowest average error "
+                "is selected. The chart shows the selected model's forecast "
+                "with a 95 % prediction interval.",
                 className="text-muted small",
             ),
             html.Div(
@@ -1152,7 +1166,7 @@ def register_callbacks(app):
                     f"Solid line: published {metric_label.lower()} for "
                     f"{focus_state}. Dashed: 12-month rolling mean. "
                     f"Shaded band: 95% prediction interval from the "
-                    f"winning bake-off model."
+                    f"selected model."
                 ),
                 blurb_id=_blurb_id("forecast"),
             ),

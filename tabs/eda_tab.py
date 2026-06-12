@@ -66,7 +66,14 @@ def render_layout():
                                 [html.B("LAUS"), " = Local Area Unemployment Statistics (BLS)"]
                             ),
                             html.Li([html.B("LFPR"), " = Labor Force Participation Rate"]),
-                            html.Li([html.B("ARIMA / ETS"), " = bake-off forecasting models"]),
+                            html.Li(
+                                [
+                                    html.B("ARIMA / ETS"),
+                                    " = forecasting models. Each forecast "
+                                    "tests several models on past data and "
+                                    "keeps the most accurate (the 'bake-off')",
+                                ]
+                            ),
                         ]
                     ),
                 ],

@@ -2,7 +2,7 @@
 Supersector employment forecast tab.
 
 For each state × (sector, horizon) a bakeoff runs over Naive /
-SeasonalNaive / ETS candidates. The winning model's forward
+SeasonalNaive / ETS candidates. The selected model's forward
 projection becomes the bar in the chart; the per-state selection
 table underneath is the auditable receipt.
 """
@@ -140,7 +140,7 @@ def _get_or_train_supersector(
 
 
 def _selection_summary(entry: dict[str, ForecastResult]) -> html.Div:
-    """Per-state table: which model won for each state + its RMSE."""
+    """Per-state table: which model was selected for each state + its RMSE."""
     rows = [
         html.Tr(
             [
@@ -155,7 +155,7 @@ def _selection_summary(entry: dict[str, ForecastResult]) -> html.Div:
     ]
     return html.Div(
         [
-            html.H6("Per-state winners"),
+            html.H6("Per-state selected models"),
             html.Table(
                 [
                     html.Thead(
@@ -292,9 +292,10 @@ def render_layout():
         [
             html.H5("Supersector Employment Forecast"),
             html.P(
-                "For each state, a Naive / Seasonal-Naive / ETS bakeoff "
-                "selects the model with the lowest expanding-window RMSE. "
-                "Bars show the winning model's forward projection with "
+                "For each state, three models (Naive / Seasonal-Naive / ETS) "
+                "compete in a bake-off: each forecasts past months it was "
+                "not fitted on, and the one with the lowest average error "
+                "is selected. Bars show the selected model's forecast with "
                 "95 % prediction intervals as error bars.",
                 className="text-muted small",
             ),
@@ -666,7 +667,7 @@ def register_callbacks(app):
 
         models_view = {
             "_kind": "supersector_models",
-            "title": "Per-state bake-off winners",
+            "title": "Per-state selected models",
             "sector": sector,
             "sector_label": sector_label,
             "winners": [
@@ -704,7 +705,7 @@ def register_callbacks(app):
                 caption=(
                     f"Bars: per-state forecast at +{years_ahead} years. "
                     f"Error bars: 95 % prediction interval from each "
-                    f"state's winning model."
+                    f"state's selected model."
                 ),
                 blurb_id=_blurb_id("forecast"),
             ),
@@ -723,9 +724,10 @@ def register_callbacks(app):
                 title=models_view["title"],
                 figure=_selection_summary(entry),
                 caption=(
-                    "Naive / Seasonal-Naive / ETS bake-off winners per "
-                    "state. Mixed picks signal methodological uncertainty; "
-                    "uniform picks signal stable signal in the data."
+                    "The model the bake-off selected for each state "
+                    "(Naive / Seasonal-Naive / ETS). Mixed picks mean no "
+                    "single model dominated across states; uniform picks "
+                    "mean one model fit every state's pattern best."
                 ),
                 blurb_id=_blurb_id("models"),
             ),

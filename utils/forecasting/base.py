@@ -9,7 +9,7 @@ pickled without dragging in a numerical stack.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import numpy as np
@@ -58,7 +58,10 @@ class ForecastDiagnostics:
     jarquebera_pvalue: float | None = None
     # Diebold-Mariano vs a baseline model. p<0.05 => this model is
     # statistically different from baseline. Sign-convention: negative
-    # DM stat means THIS model beats the baseline.
+    # DM stat means THIS model has the lower loss. NOTE: as wired in
+    # ``selection.py`` both residual series are IN-SAMPLE (full-series
+    # refits), so this compares fit, not out-of-sample forecast
+    # accuracy — UI copy must not claim otherwise.
     dm_stat_vs_baseline: float | None = None
     dm_pvalue_vs_baseline: float | None = None
 

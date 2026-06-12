@@ -47,10 +47,10 @@ def render_layout():
             html.P(
                 "An interactive data-science platform for US state-level labor "
                 "and economic indicators. Every forecast runs a multi-model "
-                "bakeoff on historical data, picks the winner by out-of-sample "
-                "RMSE, and shows the statistical diagnostics (stationarity, "
-                "residual whiteness, Diebold-Mariano vs naive baseline) under "
-                "the chart.",
+                "bake-off: candidate models each forecast past months they "
+                "were not fitted on, and the one with the lowest average "
+                "error (RMSE) is selected. Model scores and statistical "
+                "checks appear under each chart.",
                 className="lead",
             ),
             html.Hr(),
@@ -96,7 +96,7 @@ def render_layout():
                             ": sector-by-state employment forecast with a "
                             "site-selection recommendation card, a "
                             "relative-to-median threshold filter, and a "
-                            "per-state winner table.",
+                            "per-state selected-model table.",
                         ]
                     ),
                     html.Li(
@@ -113,8 +113,9 @@ def render_layout():
                                 "Forecasting — ``utils.forecasting`` runs an "
                                 "expanding-window backtest across a candidate "
                                 "set (Naive / Seasonal-Naive / Holt-Winters "
-                                "ETS by default; LSTM available as an "
-                                "opt-in), picks the minimum-RMSE model per "
+                                "ETS / ARIMA by default — the Supersector tab "
+                                "skips ARIMA for speed; LSTM available as an "
+                                "opt-in), picks the lowest-RMSE model per "
                                 "series, refits it on the full history."
                             ),
                             html.Li(
@@ -122,8 +123,9 @@ def render_layout():
                                 "for stationarity, Ljung-Box for residual "
                                 "autocorrelation, Jarque-Bera for normality, "
                                 "Diebold-Mariano with the Harvey-Leybourne-"
-                                "Newbold small-sample correction vs a Naive "
-                                "baseline."
+                                "Newbold small-sample correction, comparing "
+                                "the selected model's in-sample fit errors "
+                                "against a Naive baseline."
                             ),
                             html.Li(
                                 "Chat & blurbs — LangChain ChatOllama against "

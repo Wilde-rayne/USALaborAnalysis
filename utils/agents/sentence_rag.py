@@ -629,7 +629,8 @@ class SentenceRAGBuilder:
         if horizon:
             sentences.append(
                 f"The {sector} +{horizon}-year forecast{scope_clause} "
-                f"covers {len(rows)} state(s) with their winning bake-off models."
+                f"covers {len(rows)} state(s), each forecast by the model "
+                f"its bake-off selected."
             )
         leaders = sorted(
             [r for r in rows if r.get("forecast") is not None],
@@ -645,7 +646,7 @@ class SentenceRAGBuilder:
                 else ""
             )
             model = r.get("model")
-            model_clause = f", winning model {model.upper()}" if model else ""
+            model_clause = f", selected model {model.upper()}" if model else ""
             sentences.append(
                 f"{label}: forecast {self._fmt_value(r.get('forecast'))}"
                 f"{ci_clause}{model_clause}."
@@ -710,7 +711,7 @@ class SentenceRAGBuilder:
         if rmses:
             avg_rmse = sum(rmses) / len(rmses)
             sentences.append(
-                f"Average out-of-sample RMSE across the in-scope models is "
+                f"Average out-of-sample RMSE across the selected models is "
                 f"{avg_rmse:.2f}."
             )
         return sentences

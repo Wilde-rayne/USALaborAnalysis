@@ -29,6 +29,8 @@ default narrative entry point but the panel and tabs cover the full country.
     baselines.
   - Per-forecast diagnostics: ADF / KPSS / Ljung-Box / Jarque-Bera /
     Diebold-Mariano (with HLN small-sample correction) vs. Naive baseline.
+    The DM comparison runs on in-sample residuals from the full-series
+    refits — a fit check, not a second out-of-sample test.
 - **LLM layer — LangChain + Ollama**
   - Chat / blurbs: `llama3.2:3b` via `ChatOllama`
   - Background agents: `phi3` via `deepagents.create_deep_agent`

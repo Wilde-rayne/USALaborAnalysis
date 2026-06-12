@@ -44,9 +44,11 @@ class MethodologyNote:
 #: Applies to both LFP + Super — they share the bakeoff harness.
 FORECAST_NOTES: tuple[MethodologyNote, ...] = (
     MethodologyNote(
-        "The winning model for each series is chosen by minimum "
-        "out-of-sample RMSE over a 3-fold expanding-window backtest, "
-        "following standard practice in the forecasting literature.",
+        "The model for each series is selected by minimum out-of-sample "
+        "RMSE over a 3-fold expanding-window backtest: every candidate "
+        "forecasts three held-out stretches of past data, and its errors "
+        "are averaged across the three. This follows standard practice "
+        "in the forecasting literature.",
         cites=("hyndman_athanasopoulos_2018", "tashman_2000"),
     ),
     MethodologyNote(
@@ -90,10 +92,12 @@ DIAGNOSTIC_NOTES: tuple[MethodologyNote, ...] = (
         cites=("ljung_box_1978", "jarque_bera_1980"),
     ),
     MethodologyNote(
-        "The winning model is compared to a Naive baseline using the "
+        "The selected model is compared to a Naive baseline using the "
         "Diebold–Mariano test with the Harvey–Leybourne–Newbold "
-        "small-sample correction, so the implied significance stays "
-        "honest on short held-out windows.",
+        "small-sample correction. The comparison currently runs on "
+        "in-sample fit errors from the full-history refit — not on the "
+        "held-out backtest windows — so read it as a goodness-of-fit "
+        "check rather than an independent out-of-sample test.",
         cites=("diebold_mariano_1995", "harvey_leybourne_newbold_1997"),
     ),
     MethodologyNote(
