@@ -86,7 +86,8 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         year=1992,
         title=(
             "Testing the null hypothesis of stationarity against the "
-            "alternative of a unit root"
+            "alternative of a unit root: How sure are we that economic "
+            "time series have a unit root?"
         ),
         venue="Journal of Econometrics, 54(1–3), 159–178",
         url="https://doi.org/10.1016/0304-4076(92)90104-Y",
@@ -140,7 +141,7 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         key="bls_ces_handbook",
         authors="US Bureau of Labor Statistics",
         year=2024,
-        title="Current Employment Statistics — State and Area Employment",
+        title="Current Employment Statistics — State and Area",
         venue="BLS Handbook of Methods",
         url="https://www.bls.gov/opub/hom/sae/home.htm",
     ),
@@ -180,17 +181,20 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         key="census_acs_handbook",
         authors="US Census Bureau",
         year=2024,
-        title="American Community Survey Design and Methodology",
+        title="American Community Survey Design and Methodology Report",
         venue="US Census Bureau",
-        url="https://www.census.gov/programs-surveys/acs/methodology.html",
+        url=(
+            "https://www.census.gov/programs-surveys/acs/methodology/"
+            "design-and-methodology.html"
+        ),
     ),
     Citation(
         key="bea_regional_handbook",
         authors="US Bureau of Economic Analysis",
         year=2024,
-        title="Regional Economic Accounts — Methodology",
-        venue="BEA",
-        url="https://www.bea.gov/resources/methodologies/regional-economic-accounts",
+        title="State Personal Income and Employment: Concepts and Methods",
+        venue="BEA Regional Economic Accounts",
+        url="https://www.bea.gov/resources/methodologies/spi",
     ),
     Citation(
         key="fred_api",
@@ -204,9 +208,12 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         key="fhfa_hpi_handbook",
         authors="Federal Housing Finance Agency",
         year=2024,
-        title="House Price Index Technical Description",
+        title="House Price Indexes: HPI Technical Description",
         venue="FHFA",
-        url="https://www.fhfa.gov/data/hpi/technical-documentation",
+        url=(
+            "https://www.fhfa.gov/research/papers/"
+            "house-price-indexes-hpi-technical-description"
+        ),
     ),
     # ----- Treasury / Fed / market-rate context (Track H) -----------------
     # Academic anchor for the 10y−3m term-spread recession indicator
@@ -308,8 +315,10 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         year=2019,
         title="Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks",
         venue=(
-            "Proceedings of the 2019 Conference on Empirical Methods "
-            "in Natural Language Processing"
+            "Proceedings of the 2019 Conference on Empirical Methods in "
+            "Natural Language Processing and the 9th International Joint "
+            "Conference on Natural Language Processing (EMNLP-IJCNLP), "
+            "3982–3992"
         ),
         url="https://arxiv.org/abs/1908.10084",
     ),
@@ -330,7 +339,7 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         year=2010,
         title="Statsmodels: Econometric and Statistical Modeling with Python",
         venue="Proceedings of the 9th Python in Science Conference",
-        url="https://conference.scipy.org/proceedings/scipy2010/seabold.html",
+        url="https://doi.org/10.25080/Majora-92bf1922-011",
     ),
     Citation(
         key="pedregosa_sklearn_2011",
@@ -362,7 +371,7 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         year=2010,
         title="Data Structures for Statistical Computing in Python",
         venue="Proceedings of the 9th Python in Science Conference, 56–61",
-        url="https://conference.scipy.org/proceedings/scipy2010/mckinney.html",
+        url="https://doi.org/10.25080/Majora-92bf1922-00a",
     ),
     Citation(
         key="abadi_tensorflow_2016",
@@ -428,11 +437,14 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
     # ----- Agent architecture antecedents --------------------------------
     Citation(
         key="shinn_reflexion_2023",
-        authors="Shinn, N., Cassano, F., Berman, E., Gopinath, A., Narasimhan, K., and Yao, S.",
+        authors="Shinn, N., Cassano, F., Gopinath, A., Narasimhan, K., and Yao, S.",
         year=2023,
         title="Reflexion: Language Agents with Verbal Reinforcement Learning",
         venue="Advances in Neural Information Processing Systems 36 (NeurIPS 2023)",
-        url="https://arxiv.org/abs/2303.11366",
+        url=(
+            "https://proceedings.neurips.cc/paper_files/paper/2023/hash/"
+            "1b44b878bb782e6954cd888628510e90-Abstract-Conference.html"
+        ),
     ),
     Citation(
         key="minsky_1986",

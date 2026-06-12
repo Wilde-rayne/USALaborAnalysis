@@ -115,7 +115,88 @@ Each track branch is independently reviewable and cherry-pickable. `remediation/
 
 ## Recommended next steps
 
-1. Open one PR against `main` from `remediation/phase-1` (or four PRs, one per track).
-2. After merge, archive the per-track branches (`git branch -D remediation/track-{a,b,c,d}-*`).
-3. The previous `claude/reverent-noyce-a643f3` branch is now superseded; either close any open PR off it or merge it as a no-op given `remediation/phase-1` contains all of its work plus this remediation pass.
+1. Open one PR against `main` from `remediation/phase-1-plus` (or per-track PRs).
+2. After merge, archive the per-track branches (`git branch -D remediation/track-*`).
+3. The previous `claude/reverent-noyce-a643f3` branch is now superseded; either close any open PR off it or merge it as a no-op given the remediation chain contains all of its work plus both remediation passes.
 4. Schedule Phase 2 work from `reviews/combined-review.md` deferred section.
+
+---
+
+# Second pass (Tracks E–I)
+
+A follow-up pass driven by five further user asks, chained on top of
+`remediation/phase-1`:
+
+## Track E — Style (`a75e222`, branch `remediation/track-e-style`)
+PEP8 + numpy docstrings on public surfaces + conservative
+simplifications, scope-locked to the 23 Python files Tracks A–D had
+touched. Verified with ruff (E, W, F, I rule set) and the full test
+suite; legacy files untouched until next modified.
+
+## Track F — Variable independence & selection (`fd6e489`, branch `remediation/track-f-varselection`)
+Analysis-only layer (user-scoped: no model wiring this pass) for the
+post-Phase-E/F panel: `utils/forecasting/variable_selection.py` with
+Spearman/Pearson correlation, classical VIF (Belsley, Kuh & Welsch
+1980), a from-scratch KSG-1 KNN mutual-information estimator (Kraskov,
+Stögbauer & Grassberger 2004 — no sklearn dependency), and 8
+double-counting heuristics rooted in known concept overlaps (CES vs
+QCEW, sector sums vs totals, rate-vs-components identities, ACS WAP vs
+PEP, FRED vs BEA income, CPI vs deflated series). 29 tests incl.
+hypothesis property tests; methodology report at
+`docs/methodology/variable_selection.md` with an explicit
+bias-discipline section. Phase 2 wires the results into the bakeoff.
+
+## Track G — Winner-explanation accuracy (`e43f46c`, branch `remediation/track-g-winners`)
+Audited every user-facing explanation of the bakeoff pick against the
+engine's ground truth. Selection is genuinely out-of-sample (3-fold
+expanding-window, fold-averaged RMSE); the Diebold-Mariano comparison
+is in-sample (full-history refits) and all prose now says so instead
+of overclaiming. About-tab candidate list gained the missing ARIMA.
+"Winning model" → "selected model" across prose (API keys unchanged);
+the ★ in the score table is now explained in plain words.
+
+## Track H — Treasury fetcher + macro/policy context (`4ead56a` + citation fixes, branch `remediation/track-h-context`)
+Per user scope: ONE new fetcher (Treasury constant-maturity yields
+GS10/GS2/GS3M via FRED, monthly, national → broadcast like JOLTS, with
+the 10y−3m recession-indicator spread computed at read time per
+Estrella & Mishkin 1996), plus citation registry entries and RAG
+context snippets for the Fed (H.15, FOMC, Beige Book), Nasdaq Data
+Link, and CME FedWatch. 9 source-attributed `CONTEXT_SNIPPETS` ground
+the narrative LLM's rate/policy answers. +22 tests.
+
+## Track I — Multi-agent source validation + holistic review (this commit)
+Per the user's explicit ask, all 45 registry citations and 9 context
+snippets went through a multi-agent verification workflow (5 parallel
+citation verifiers + a snippet fact-checker, with adversarial
+refutation on flags). Confirmed fixes applied:
+- `fhfa_hpi_handbook` — cited URL was genuinely dead (404); now points
+  at the live FHFA HPI Technical Description page with the exact page
+  title.
+- `kpss_1992` — restored the published title's subtitle.
+- `seabold_perktold_2010` / `mckinney_pandas_2010` — SciPy-conference
+  pages became "content has moved" stubs; now cite the canonical
+  proceedings DOIs.
+- `reimers_gurevych_2019` — venue corrected to the joint EMNLP-IJCNLP
+  proceedings with page range.
+Holistic intent checks: M0-1 guard re-verified at HEAD (663 series IDs,
+zero ontology/JSON mismatches), headline fixes from Tracks A/B
+re-confirmed after the later style/prose passes, full suite green.
+
+## Verification (second pass)
+
+- `python -m pytest tests/`: **333 passed, 5 skipped** (was 282/5 at
+  the end of pass 1; +29 Track F, +22 Track H).
+- `python -m ruff check --select=E,W,F,I` clean on every file touched
+  in pass 2.
+
+## Branch chain (full)
+
+```
+reviewable/loving-shtern-800851 @ 58e5ac7  (reviews/* committed)
+└── …phase-1 chain (Tracks A–D, see above) @ 9bda268
+    └── remediation/track-e-style @ a75e222
+        └── remediation/track-f-varselection @ fd6e489
+            └── remediation/track-g-winners @ e43f46c
+                └── remediation/track-h-context @ 4ead56a
+                    └── remediation/phase-1-plus @ HEAD  (Track I + this update)
+```
