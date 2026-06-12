@@ -6,7 +6,10 @@ Surfaces, in one collapsible block per tab:
 1. What the forecast actually did (scoring rule + backtest protocol),
 2. Which candidate models competed and the paper each cites,
 3. Which statistical tests we ran on the residuals + series,
-4. Which BLS / Census / BEA / FRED datasets feed the pipeline.
+4. Which BLS / Census / BEA / Treasury / FRED datasets feed the
+   pipeline, plus the qualitative macro & policy context sources
+   (FOMC, Beige Book, Nasdaq Data Link, CME FedWatch) surfaced to the
+   narrative agent.
 
 Every claim carries an inline citation that round-trips through
 ``utils.citations``; the references panel surfaces the academic and
@@ -114,6 +117,34 @@ DIAGNOSTIC_NOTES: tuple[MethodologyNote, ...] = (
     ),
 )
 
+# ---------------------------------------------------------------------------
+# Macro & policy context (Track H)
+# ---------------------------------------------------------------------------
+#: Single bullet rendered inside the "Data sources" block: explains how
+#: Treasury yields enter the panel (national broadcast + computed
+#: 10y−3m spread) and which qualitative sources ground the narrative
+#: agent. Kept to ONE note so the panel stays scannable.
+CONTEXT_NOTES: tuple[MethodologyNote, ...] = (
+    MethodologyNote(
+        "National macro context: Treasury constant-maturity yields "
+        "(10-year, 2-year, 3-month; FRED series GS10 / GS2 / GS3M, "
+        "republished from the Federal Reserve H.15 release) enter the "
+        "panel as national context variables broadcast to all states, "
+        "and the 10-year-minus-3-month term spread is included as a "
+        "classic recession leading indicator. FOMC statements, the "
+        "Beige Book, Nasdaq Data Link, and the CME FedWatch Tool are "
+        "linked below as qualitative context sources surfaced to the "
+        "narrative agent.",
+        cites=(
+            "estrella_mishkin_1996",
+            "fed_fomc_statements",
+            "fed_beige_book",
+            "nasdaq_data_link",
+            "cme_fedwatch",
+        ),
+    ),
+)
+
 DATA_SOURCE_KEYS: tuple[str, ...] = (
     "bls_ces_handbook",
     "bls_laus_handbook",
@@ -124,6 +155,23 @@ DATA_SOURCE_KEYS: tuple[str, ...] = (
     "bea_regional_handbook",
     "fred_api",
     "fhfa_hpi_handbook",
+    # Treasury yield lineage (Track H): Treasury par yield curve →
+    # H.15 constant-maturity rates → FRED GS-series monthly averages.
+    "treasury_yield_curve",
+    "fred_treasury_cmt",
+    "fed_h15",
+)
+
+#: Qualitative macro & policy context sources (Track H). These do not
+#: feed any chart — they are linked for the narrative agent's
+#: rate/policy grounding (see ``utils.agents.sentence_rag``
+#: ``CONTEXT_SNIPPETS``) — so they render as their own linked list
+#: under the data sources rather than claiming figure provenance.
+CONTEXT_SOURCE_KEYS: tuple[str, ...] = (
+    "fed_fomc_statements",
+    "fed_beige_book",
+    "nasdaq_data_link",
+    "cme_fedwatch",
 )
 
 #: Short, one-line attribution string suitable for a chart caption /
@@ -134,8 +182,8 @@ DATA_SOURCE_KEYS: tuple[str, ...] = (
 DATA_SOURCE_FOOTER: str = (
     "Source: U.S. Bureau of Labor Statistics (CES, LAUS, JOLTS, QCEW, "
     "CPI); U.S. Census Bureau (ACS, PEP); U.S. Bureau of Economic "
-    "Analysis; Federal Reserve Bank of St. Louis (FRED); Federal "
-    "Housing Finance Agency."
+    "Analysis; U.S. Department of the Treasury; Federal Reserve Bank "
+    "of St. Louis (FRED); Federal Housing Finance Agency."
 )
 
 
@@ -262,11 +310,42 @@ def _render_references(keys: Iterable[str]) -> html.Ol:
     return html.Ol(items, className="pi-method-refs")
 
 
+def _render_source_links(keys: Iterable[str]) -> html.Ul:
+    """Render citation keys as a linked ``Title — venue (inline cite)`` list.
+
+    Shared by the data-source, macro-context, and software-attribution
+    blocks so the three lists stay visually identical.
+    """
+    return html.Ul(
+        [
+            html.Li(
+                [
+                    citation(k).title,
+                    " — ",
+                    html.A(
+                        citation(k).venue,
+                        href=citation(k).url,
+                        target="_blank",
+                        rel="noopener",
+                    )
+                    if citation(k).url
+                    else citation(k).venue,
+                    f" {render_inline(k)}",
+                ]
+            )
+            for k in keys
+        ],
+        className="pi-method-list",
+    )
+
+
 def methodology_panel(
     *,
     forecast_notes: Iterable[MethodologyNote] = FORECAST_NOTES,
     diagnostic_notes: Iterable[MethodologyNote] = DIAGNOSTIC_NOTES,
+    context_notes: Iterable[MethodologyNote] = CONTEXT_NOTES,
     data_source_keys: Iterable[str] = DATA_SOURCE_KEYS,
+    context_source_keys: Iterable[str] = CONTEXT_SOURCE_KEYS,
     software_keys: Iterable[str] = SOFTWARE_ATTRIBUTION_KEYS,
     open_by_default: bool = False,
     summary_text: str = "Methodology & references",
@@ -282,9 +361,15 @@ def methodology_panel(
     forecast_notes, diagnostic_notes : Iterable[MethodologyNote], optional
         Bullet sets shown under "Forecasting & scoring" and "Residual &
         series diagnostics", respectively.
+    context_notes : Iterable[MethodologyNote], optional
+        Macro & policy context bullets rendered inside the "Data
+        sources" block (default :data:`CONTEXT_NOTES`).
     data_source_keys, software_keys : Iterable[str], optional
         Citation keys surfaced under "Data sources" and "Software & model
         attribution".
+    context_source_keys : Iterable[str], optional
+        Citation keys for the qualitative macro/policy sources linked
+        under the data sources (default :data:`CONTEXT_SOURCE_KEYS`).
     open_by_default : bool, optional
         When True, the ``<details>`` element renders open.
     summary_text : str, optional
@@ -297,13 +382,16 @@ def methodology_panel(
     """
     forecast_notes = tuple(forecast_notes)
     diagnostic_notes = tuple(diagnostic_notes)
+    context_notes = tuple(context_notes)
     data_source_keys = tuple(data_source_keys)
+    context_source_keys = tuple(context_source_keys)
     software_keys = tuple(software_keys)
 
     all_keys: set[str] = set()
-    for n in forecast_notes + diagnostic_notes:
+    for n in forecast_notes + diagnostic_notes + context_notes:
         all_keys.update(n.cites)
     all_keys.update(data_source_keys)
+    all_keys.update(context_source_keys)
     all_keys.update(software_keys)
 
     return html.Details(
@@ -321,27 +409,14 @@ def methodology_panel(
                         "one of the following published data programs.",
                         className="text-muted small",
                     ),
-                    html.Ul(
-                        [
-                            html.Li(
-                                [
-                                    citation(k).title,
-                                    " — ",
-                                    html.A(
-                                        citation(k).venue,
-                                        href=citation(k).url,
-                                        target="_blank",
-                                        rel="noopener",
-                                    )
-                                    if citation(k).url
-                                    else citation(k).venue,
-                                    f" {render_inline(k)}",
-                                ]
-                            )
-                            for k in data_source_keys
-                        ],
-                        className="pi-method-list",
+                    _render_source_links(data_source_keys),
+                    _render_notes(context_notes),
+                    html.P(
+                        "Qualitative macro & policy context linked for "
+                        "the narrative layer (not chart inputs):",
+                        className="text-muted small",
                     ),
+                    _render_source_links(context_source_keys),
                     html.H6("Software & model attribution"),
                     html.P(
                         [
@@ -362,27 +437,7 @@ def methodology_panel(
                         ],
                         className="text-muted small",
                     ),
-                    html.Ul(
-                        [
-                            html.Li(
-                                [
-                                    citation(k).title,
-                                    " — ",
-                                    html.A(
-                                        citation(k).venue,
-                                        href=citation(k).url,
-                                        target="_blank",
-                                        rel="noopener",
-                                    )
-                                    if citation(k).url
-                                    else citation(k).venue,
-                                    f" {render_inline(k)}",
-                                ]
-                            )
-                            for k in software_keys
-                        ],
-                        className="pi-method-list",
-                    ),
+                    _render_source_links(software_keys),
                     html.H6("References"),
                     _render_references(all_keys),
                 ],

@@ -197,7 +197,12 @@ def phase_ef_data_dirs(
     cpi_dir = tmp_path / "raw" / "cpi"
     fred_dir = tmp_path / "raw" / "fred"
     bea_dir = tmp_path / "raw" / "bea"
-    for d in (laus_dir, ces_dir, qcew_dir, jolts_dir, cpi_dir, fred_dir, bea_dir):
+    treasury_dir = tmp_path / "raw" / "treasury"
+    dirs = (
+        laus_dir, ces_dir, qcew_dir, jolts_dir, cpi_dir, fred_dir,
+        bea_dir, treasury_dir,
+    )
+    for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
 
     # LAUS + Population (re-used from the main fixture). Keep this self
@@ -242,6 +247,29 @@ def phase_ef_data_dirs(
         encoding="utf-8",
     )
 
+    # Treasury national CMT yields (JSON, per utils.fetch_treasury_data).
+    # GS10 covers Jan+Feb but GS3M only Jan, so the computed 10y−3m
+    # spread must exist for January only.
+    (treasury_dir / "GS10.json").write_text(
+        json.dumps([
+            {"series_id": "GS10", "year": 2020, "period": "M01", "value": 1.76},
+            {"series_id": "GS10", "year": 2020, "period": "M02", "value": 1.50},
+        ]),
+        encoding="utf-8",
+    )
+    (treasury_dir / "GS2.json").write_text(
+        json.dumps([
+            {"series_id": "GS2", "year": 2020, "period": "M01", "value": 1.45},
+        ]),
+        encoding="utf-8",
+    )
+    (treasury_dir / "GS3M.json").write_text(
+        json.dumps([
+            {"series_id": "GS3M", "year": 2020, "period": "M01", "value": 1.52},
+        ]),
+        encoding="utf-8",
+    )
+
     ces_json_path = tmp_path / "ces_state_sms_codes.json"
     ces_json_path.write_text(
         json.dumps({"Manufacturing": {"IA": "SMS19000001000000001"}}),
@@ -260,6 +288,7 @@ def phase_ef_data_dirs(
     monkeypatch.setattr(merge_mod, "RAW_DIR_CPI", str(cpi_dir))
     monkeypatch.setattr(merge_mod, "RAW_DIR_FRED", str(fred_dir))
     monkeypatch.setattr(merge_mod, "RAW_DIR_BEA", str(bea_dir))
+    monkeypatch.setattr(merge_mod, "RAW_DIR_TREASURY", str(treasury_dir))
     monkeypatch.setattr(merge_mod, "CES_JSON", str(ces_json_path))
     return tmp_path
 
@@ -317,3 +346,73 @@ class TestPhaseEFReaders:
         assert jan["IA_CPI_AllItems"] == pytest.approx(250.5)
         assert jan["IA_FRED_UR"] == pytest.approx(3.6)
         assert jan["IA_BEA_SAINC1_L3"] == pytest.approx(55000.0)
+
+
+class TestReadTreasury:
+    """National Treasury CMT yields — broadcast + computed 10y−3m spread."""
+
+    def test_reads_national_series_into_long_format(
+        self, phase_ef_data_dirs: Path
+    ) -> None:
+        df = merge_mod.read_treasury(["IA"], 2020, 2020)
+        assert set(df.columns) >= {"state", "year", "month", "metric", "value"}
+        assert set(df["metric"].unique()) == {
+            "TREASURY_GS10",
+            "TREASURY_GS2",
+            "TREASURY_GS3M",
+            "TREASURY_SPREAD_10Y3M",
+        }
+        jan_gs10 = df[(df["metric"] == "TREASURY_GS10") & (df["month"] == 1)]
+        assert jan_gs10["value"].to_numpy() == pytest.approx(1.76)
+
+    def test_spread_computed_only_when_both_legs_present(
+        self, phase_ef_data_dirs: Path
+    ) -> None:
+        """GS10 has Jan+Feb but GS3M only Jan → spread exists for Jan only."""
+        df = merge_mod.read_treasury(["IA"], 2020, 2020)
+        spread = df[df["metric"] == "TREASURY_SPREAD_10Y3M"]
+        assert set(spread["month"].unique()) == {1}
+        assert spread["value"].to_numpy() == pytest.approx(1.76 - 1.52)
+        # February still carries the GS10 leg on its own.
+        feb_gs10 = df[(df["metric"] == "TREASURY_GS10") & (df["month"] == 2)]
+        assert not feb_gs10.empty
+
+    def test_broadcasts_national_values_to_every_state(
+        self, phase_ef_data_dirs: Path
+    ) -> None:
+        df = merge_mod.read_treasury(["IA", "IL"], 2020, 2020)
+        assert set(df["state"].unique()) == {"IA", "IL"}
+        jan = df[(df["metric"] == "TREASURY_GS10") & (df["month"] == 1)]
+        ia_val = jan[jan["state"] == "IA"]["value"].iloc[0]
+        il_val = jan[jan["state"] == "IL"]["value"].iloc[0]
+        assert ia_val == il_val == pytest.approx(1.76)
+
+    def test_missing_raw_dir_returns_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            merge_mod, "RAW_DIR_TREASURY", str(tmp_path / "nope")
+        )
+        assert merge_mod.read_treasury(["IA"], 2020, 2020).empty
+
+    def test_reader_series_ids_stay_in_sync_with_fetcher_registry(self) -> None:
+        """The merger keeps a literal copy of the fetcher registry keys
+        (to avoid importing ``requests`` at merge time) — lock the two
+        together so a new maturity can't be added on one side only."""
+        from utils.fetch_treasury_data import TREASURY_SERIES
+
+        assert set(merge_mod._TREASURY_SERIES_IDS) == set(TREASURY_SERIES)
+
+    def test_merge_includes_treasury_columns(
+        self, phase_ef_data_dirs: Path
+    ) -> None:
+        panel = merge_mod.merge_all_data(["IA"], 2020, 2020)
+        jan = panel[(panel["year"] == 2020) & (panel["month"] == 1)].iloc[0]
+        assert jan["IA_TREASURY_GS10"] == pytest.approx(1.76)
+        assert jan["IA_TREASURY_GS2"] == pytest.approx(1.45)
+        assert jan["IA_TREASURY_GS3M"] == pytest.approx(1.52)
+        assert jan["IA_TREASURY_SPREAD_10Y3M"] == pytest.approx(0.24)
+        # February: GS10 present, but no GS3M → spread column is NaN.
+        feb = panel[(panel["year"] == 2020) & (panel["month"] == 2)].iloc[0]
+        assert feb["IA_TREASURY_GS10"] == pytest.approx(1.50)
+        assert pd.isna(feb["IA_TREASURY_SPREAD_10Y3M"])

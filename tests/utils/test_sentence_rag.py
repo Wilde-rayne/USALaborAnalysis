@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from utils.agents.sentence_rag import (
+    CONTEXT_SNIPPETS,
     SentenceRAGBuilder,
     _is_lower_better,
     _ordinal,
@@ -114,6 +115,50 @@ class TestBuildCorpus:
         assert any("averaged" in s for s in corpus)            # fact
         assert any("ranked" in s for s in corpus)              # ranking
         assert any("rose" in s or "fell" in s for s in corpus) # trend
+
+    def test_context_snippets_appended_by_default(self, sample_records) -> None:
+        corpus = SentenceRAGBuilder().build_corpus(sample_records)
+        for snippet in CONTEXT_SNIPPETS:
+            assert snippet in corpus
+
+    def test_context_snippets_can_be_opted_out(self, sample_records) -> None:
+        corpus = SentenceRAGBuilder().build_corpus(sample_records, extra_snippets=())
+        for snippet in CONTEXT_SNIPPETS:
+            assert snippet not in corpus
+
+    def test_custom_extra_snippets_replace_defaults(self, sample_records) -> None:
+        custom = ("A custom grounding sentence.",)
+        corpus = SentenceRAGBuilder().build_corpus(
+            sample_records, extra_snippets=custom
+        )
+        assert "A custom grounding sentence." in corpus
+        assert CONTEXT_SNIPPETS[0] not in corpus
+
+
+class TestContextSnippets:
+    def test_non_empty_and_well_formed(self) -> None:
+        assert len(CONTEXT_SNIPPETS) >= 6
+        for snippet in CONTEXT_SNIPPETS:
+            assert snippet.strip() == snippet
+            assert snippet.endswith(".")
+            # Each snippet stays short enough to embed as one passage.
+            assert len(snippet) < 400
+
+    def test_each_snippet_names_a_source(self) -> None:
+        """Every snippet must carry attribution the narrative LLM can cite."""
+        sources = (
+            "Estrella", "FRED", "Treasury", "H.15", "Federal Reserve",
+            "FOMC", "Beige Book", "CME", "Nasdaq", "federalreserve.gov",
+            "cmegroup.com", "data.nasdaq.com",
+        )
+        unattributed = [
+            s for s in CONTEXT_SNIPPETS
+            if not any(token in s for token in sources)
+        ]
+        # The rates→labor mechanism sentence is general macro consensus,
+        # deliberately hedged ("typically") rather than source-pinned.
+        assert len(unattributed) <= 1
+
 
 class TestHelpers:
     @pytest.mark.parametrize(

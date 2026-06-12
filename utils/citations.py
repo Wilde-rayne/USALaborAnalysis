@@ -208,6 +208,99 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         venue="FHFA",
         url="https://www.fhfa.gov/data/hpi/technical-documentation",
     ),
+    # ----- Treasury / Fed / market-rate context (Track H) -----------------
+    # Academic anchor for the 10y−3m term-spread recession indicator
+    # computed in utils.merge_all_data.read_treasury.
+    Citation(
+        key="estrella_mishkin_1996",
+        authors="Estrella, A., and Mishkin, F. S.",
+        year=1996,
+        title="The Yield Curve as a Predictor of U.S. Recessions",
+        venue=(
+            "Federal Reserve Bank of New York, Current Issues in "
+            "Economics and Finance, 2(7)"
+        ),
+        url=(
+            "https://www.newyorkfed.org/medialibrary/media/research/"
+            "current_issues/ci2-7.pdf"
+        ),
+    ),
+    Citation(
+        key="treasury_yield_curve",
+        authors="US Department of the Treasury",
+        year=2024,
+        title="Daily Treasury Par Yield Curve Rates",
+        venue="US Department of the Treasury, Interest Rate Statistics",
+        url=(
+            "https://home.treasury.gov/resource-center/data-chart-center/"
+            "interest-rates/TextView?type=daily_treasury_yield_curve"
+        ),
+    ),
+    # FRED retitled the H.15 CMT republications in 2022; the [GS10]
+    # bracket id follows FRED's own suggested-citation format.
+    Citation(
+        key="fred_treasury_cmt",
+        authors="Board of Governors of the Federal Reserve System (US)",
+        year=2024,
+        title=(
+            "Market Yield on U.S. Treasury Securities at 10-Year Constant "
+            "Maturity, Quoted on an Investment Basis [GS10]"
+        ),
+        venue="FRED, Federal Reserve Bank of St. Louis",
+        url="https://fred.stlouisfed.org/series/GS10",
+    ),
+    Citation(
+        key="fed_h15",
+        authors="Board of Governors of the Federal Reserve System (US)",
+        year=2024,
+        title="H.15 Selected Interest Rates",
+        venue="Federal Reserve Statistical Release",
+        url="https://www.federalreserve.gov/releases/h15/",
+    ),
+    Citation(
+        key="fed_fomc_statements",
+        authors="Board of Governors of the Federal Reserve System (US)",
+        year=2024,
+        title=(
+            "Federal Open Market Committee: Meeting Calendars, Statements, "
+            "and Minutes"
+        ),
+        venue="Board of Governors of the Federal Reserve System",
+        url="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+    ),
+    Citation(
+        key="fed_beige_book",
+        authors="Board of Governors of the Federal Reserve System (US)",
+        year=2024,
+        title=(
+            "The Beige Book: Summary of Commentary on Current Economic "
+            "Conditions by Federal Reserve District"
+        ),
+        venue="Board of Governors of the Federal Reserve System",
+        url=(
+            "https://www.federalreserve.gov/monetarypolicy/publications/"
+            "beige-book-default.htm"
+        ),
+    ),
+    Citation(
+        key="nasdaq_data_link",
+        authors="Nasdaq, Inc.",
+        year=2024,
+        title="Nasdaq Data Link",
+        venue="Nasdaq, Inc.",
+        url="https://data.nasdaq.com/",
+    ),
+    Citation(
+        key="cme_fedwatch",
+        authors="CME Group Inc.",
+        year=2024,
+        title="CME FedWatch Tool",
+        venue="CME Group",
+        url=(
+            "https://www.cmegroup.com/markets/interest-rates/"
+            "cme-fedwatch-tool.html"
+        ),
+    ),
     # ----- Software / model attribution ----------------------------------
     Citation(
         key="reimers_gurevych_2019",

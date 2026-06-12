@@ -18,7 +18,9 @@ they need:
 2. :meth:`ranking_sentences` — ontology-enriched comparative framing
    that gives the embedder context (peer groups, rank positions).
 
-``build_corpus`` wires both up; the corpus is always zero-LLM-call.
+``build_corpus`` wires both up — plus the static
+:data:`CONTEXT_SNIPPETS` rate/policy grounding layer — and the corpus
+is always zero-LLM-call.
 """
 from __future__ import annotations
 
@@ -41,6 +43,50 @@ _RAG_MEASURES: tuple[str, ...] = (
     "Unemployment_Rate",
     "LFPR",
     "Population",
+)
+
+
+#: Static macro-context snippets embedded alongside the panel-derived
+#: sentences (Track H). Each names its source so the narrative LLM can
+#: attribute the claim; the matching registry entries live in
+#: ``utils.citations`` (``estrella_mishkin_1996``,
+#: ``treasury_yield_curve``, ``fed_h15``, ``fed_fomc_statements``,
+#: ``fed_beige_book``, ``nasdaq_data_link``, ``cme_fedwatch``). The
+#: snippets flow through :meth:`SentenceRAGBuilder.build_corpus` like
+#: any other corpus sentence, so the e5 ``passage:`` prefix is applied
+#: automatically at embed time (see ``utils.embeddings``).
+CONTEXT_SNIPPETS: tuple[str, ...] = (
+    "The Treasury yield-curve spread (10-year minus 3-month "
+    "constant-maturity yield) is a classic leading indicator of U.S. "
+    "recessions, and an inverted spread has preceded most postwar U.S. "
+    "recessions (Estrella & Mishkin, 1996; data: FRED series GS10 and "
+    "GS3M).",
+    "Treasury constant-maturity yields in this dashboard are national "
+    "monthly averages from the Federal Reserve Board's H.15 Selected "
+    "Interest Rates release, retrieved via FRED; they are broadcast to "
+    "every state as shared macro context rather than measured per state.",
+    "Constant-maturity Treasury yields are interpolated by the U.S. "
+    "Department of the Treasury from its daily par yield curve, "
+    "published as the Daily Treasury Par Yield Curve Rates.",
+    "In the merged panel, TREASURY_SPREAD_10Y3M is the FRED GS10 yield "
+    "minus the GS3M yield for months where both are available; a "
+    "negative value means the yield curve is inverted.",
+    "The Federal Open Market Committee (FOMC) sets the target range for "
+    "the federal funds rate; its meeting statements and minutes are "
+    "published on the Federal Reserve Board website (federalreserve.gov).",
+    "The Beige Book, published eight times per year by the Federal "
+    "Reserve, summarizes qualitative economic conditions — including "
+    "labor-market commentary — across the twelve Federal Reserve "
+    "Districts.",
+    "CME Group's FedWatch Tool publishes market-implied probabilities "
+    "of Federal Reserve rate decisions derived from federal funds "
+    "futures prices (cmegroup.com).",
+    "Nasdaq Data Link (data.nasdaq.com, formerly Quandl) aggregates "
+    "financial and economic datasets, including equity-index and "
+    "macroeconomic series, under a mix of free and licensed terms.",
+    "Higher policy interest rates raise borrowing costs and typically "
+    "cool hiring in rate-sensitive sectors such as construction and "
+    "manufacturing, with a lag of several quarters.",
 )
 
 
@@ -277,14 +323,37 @@ class SentenceRAGBuilder:
     # ------------------------------------------------------------------
     # Top-level
     # ------------------------------------------------------------------
-    def build_corpus(self, records: Iterable[dict]) -> list[str]:
-        """Return the concatenation of facts, rankings, and trend sentences."""
+    def build_corpus(
+        self,
+        records: Iterable[dict],
+        extra_snippets: Iterable[str] | None = None,
+    ) -> list[str]:
+        """Return facts, rankings, trends, plus static context snippets.
+
+        Parameters
+        ----------
+        records : Iterable[dict]
+            Long-form panel rows; see :meth:`fact_sentences`.
+        extra_snippets : Iterable[str], optional
+            Static context sentences appended verbatim to the corpus.
+            Defaults to :data:`CONTEXT_SNIPPETS` (rate/policy grounding
+            for the narrative agent); pass ``()`` to opt out.
+
+        Returns
+        -------
+        list[str]
+            Corpus sentences ready for the embedding pipeline.
+        """
         # Materialize the records once — each layer wants to iterate.
         records_list = list(records)
+        snippets = (
+            CONTEXT_SNIPPETS if extra_snippets is None else tuple(extra_snippets)
+        )
         return (
             self.fact_sentences(records_list)
             + self.ranking_sentences(records_list)
             + self.trend_sentences(records_list)
+            + list(snippets)
         )
 
     # ------------------------------------------------------------------

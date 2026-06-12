@@ -17,7 +17,15 @@ RAW_DIR_JOLTS = "data/raw/jolts"
 RAW_DIR_CPI  = "data/raw/cpi"
 RAW_DIR_FRED = "data/raw/fred"
 RAW_DIR_BEA  = "data/raw/bea"
+RAW_DIR_TREASURY = "data/raw/treasury"
 CES_JSON     = "data/ces_state_sms_codes.json"
+
+#: Treasury series the merger recognises — file stems under
+#: :data:`RAW_DIR_TREASURY` written by ``utils.fetch_treasury_data``.
+#: Kept as a literal (rather than importing the fetcher registry) so
+#: the merger never needs ``requests`` at import time; a unit test
+#: asserts the two stay in sync.
+_TREASURY_SERIES_IDS: tuple[str, ...] = ("GS10", "GS2", "GS3M")
 
 # Map ONTOLOGY region label → BLS CPI region code. Used to broadcast
 # regional CPI rows back to the per-state panel so each state inherits
@@ -215,8 +223,8 @@ def read_working_age_population(states: list, start: int, end: int) -> pd.DataFr
 
 
 # ---------------------------------------------------------------------------
-# Phase E/F readers — pull QCEW / JOLTS / CPI / FRED / BEA into the panel.
-# Each helper returns a long-format DataFrame with at least
+# Phase E/F readers — pull QCEW / JOLTS / CPI / FRED / BEA / Treasury
+# into the panel. Each helper returns a long-format DataFrame with at least
 # (year, month) plus one or more metric columns; per-state files also
 # carry a ``state`` column. The merger broadcasts national-only and
 # annual-only series across the requested grid so downstream consumers
@@ -597,6 +605,102 @@ def read_bea(states: list, start: int, end: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def read_treasury(states: list, start: int, end: int) -> pd.DataFrame:
+    """Read national Treasury yield JSONs and broadcast them across states.
+
+    ``utils.fetch_treasury_data`` writes one ``{series}.json`` per FRED
+    Treasury constant-maturity series (GS10 / GS2 / GS3M), each a JSON
+    list of records shaped like the FRED TXT rows: ``series_id, year,
+    period, value``. The series are NATIONAL, so — exactly like JOLTS —
+    every requested state inherits the same monthly value; the join is
+    informational macro context, not a per-state measurement.
+
+    The 10-year-minus-3-month term spread is the classic recession
+    leading indicator (Estrella & Mishkin, 1996, "The Yield Curve as a
+    Predictor of U.S. Recessions"). FRED's ready-made spread series
+    (``T10Y3M``) is daily-only, so the monthly spread is computed here
+    as ``GS10 − GS3M`` and emitted as ``TREASURY_SPREAD_10Y3M`` only
+    for months where both legs are present.
+
+    Parameters
+    ----------
+    states : list
+        USPS state codes; each receives a copy of the national series.
+    start, end : int
+        Inclusive year range.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format ``(state, year, month, metric, value)`` with
+        metrics ``TREASURY_GS10``, ``TREASURY_GS2``, ``TREASURY_GS3M``,
+        and ``TREASURY_SPREAD_10Y3M``.
+    """
+    if not os.path.isdir(RAW_DIR_TREASURY):
+        return pd.DataFrame()
+
+    # {(year, month): {series_id: value}} so the spread can be derived
+    # from aligned legs after all files are read.
+    national: dict[tuple[int, int], dict[str, float]] = {}
+    for fn in os.listdir(RAW_DIR_TREASURY):
+        if not fn.endswith(".json"):
+            continue
+        sid = fn[:-5]
+        if sid not in _TREASURY_SERIES_IDS:
+            continue
+        path = os.path.join(RAW_DIR_TREASURY, fn)
+        try:
+            with open(path, encoding="utf-8") as f:
+                records = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(f"[MERGE] Treasury file {fn} unreadable: {exc}")
+            continue
+        if not isinstance(records, list):
+            logger.warning(f"[MERGE] Treasury file {fn}: expected a JSON list")
+            continue
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            period = str(rec.get("period", ""))
+            if not period.startswith("M"):
+                continue
+            try:
+                year = int(rec.get("year"))
+                month = int(period[1:])
+                value = float(rec.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if not (start <= year <= end) or not (1 <= month <= 12):
+                continue
+            national.setdefault((year, month), {})[sid] = value
+
+    if not national or not states:
+        return pd.DataFrame()
+
+    long_rows: list[dict] = []
+    for (year, month), by_sid in sorted(national.items()):
+        for sid in _TREASURY_SERIES_IDS:
+            if sid in by_sid:
+                long_rows.append(
+                    {"year": year, "month": month,
+                     "metric": f"TREASURY_{sid}", "value": by_sid[sid]}
+                )
+        # Spread only when both legs exist for the month — a one-leg
+        # spread would silently mean "GS10 minus nothing".
+        if "GS10" in by_sid and "GS3M" in by_sid:
+            long_rows.append(
+                {"year": year, "month": month,
+                 "metric": "TREASURY_SPREAD_10Y3M",
+                 "value": by_sid["GS10"] - by_sid["GS3M"]}
+            )
+
+    national_df = pd.DataFrame(long_rows)
+    # Broadcast to every state — same convention as read_jolts: the
+    # series is national; every state row sees the same value.
+    out_rows = [national_df.assign(state=st) for st in states]
+    return pd.concat(out_rows, ignore_index=True)
+
+
 def _join_long_phase_ef(panel: pd.DataFrame, long_df: pd.DataFrame) -> pd.DataFrame:
     """Pivot a long Phase-E/F frame into ``{ST}_{METRIC}`` columns and merge.
 
@@ -812,21 +916,23 @@ def merge_all_data(states: list, start: int, end: int) -> pd.DataFrame:
         logger.error(f"[MERGE] CES JSON not found: {CES_JSON}")
 
     # ---------------------------------------------------------------- *
-    # Phase E/F: QCEW, JOLTS, CPI, FRED, BEA
+    # Phase E/F (+ Treasury): QCEW, JOLTS, CPI, FRED, BEA, Treasury
     # ---------------------------------------------------------------- *
     # Each reader returns (state, year, month, metric, value) long form.
     # ``_join_long_phase_ef`` pivots into ``{ST}_{METRIC}`` columns and
     # left-joins by (year, month). Sources that publish at coarser
     # cadences than monthly (QCEW = quarterly, FRED-annual, BEA = annual)
     # are pre-broadcast by their reader; sources without a per-state
-    # signal (CPI regional, JOLTS national) are pre-broadcast to every
-    # state so the column shape is always ``{ST}_{METRIC}``.
+    # signal (CPI regional, JOLTS national, Treasury national) are
+    # pre-broadcast to every state so the column shape is always
+    # ``{ST}_{METRIC}``.
     for source_name, reader in (
         ("QCEW",  read_qcew),
         ("JOLTS", read_jolts),
         ("CPI",   read_cpi),
         ("FRED",  read_fred),
         ("BEA",   read_bea),
+        ("TREASURY", read_treasury),
     ):
         try:
             long_df = reader(states, start, end)
