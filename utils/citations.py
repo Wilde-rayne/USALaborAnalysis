@@ -302,6 +302,36 @@ _CITATIONS_LIST: tuple[Citation, ...] = (
         venue="The Annals of Statistics, 7(1), 1–26",
         url="https://doi.org/10.1214/aos/1176344552",
     ),
+    # ----- Variable selection / collinearity / mutual information --------
+    Citation(
+        key="belsley_kuh_welsch_1980",
+        authors="Belsley, D. A., Kuh, E., and Welsch, R. E.",
+        year=1980,
+        title=(
+            "Regression Diagnostics: Identifying Influential Data and "
+            "Sources of Collinearity"
+        ),
+        venue="John Wiley & Sons, New York",
+        url="https://doi.org/10.1002/0471725153",
+    ),
+    Citation(
+        key="kraskov_stoegbauer_grassberger_2004",
+        authors="Kraskov, A., Stögbauer, H., and Grassberger, P.",
+        year=2004,
+        title="Estimating mutual information",
+        venue="Physical Review E, 69(6), 066138",
+        url="https://doi.org/10.1103/PhysRevE.69.066138",
+    ),
+    Citation(
+        key="james_witten_hastie_tibshirani_2013",
+        authors=(
+            "James, G., Witten, D., Hastie, T., and Tibshirani, R."
+        ),
+        year=2013,
+        title="An Introduction to Statistical Learning, with Applications in R",
+        venue="Springer, New York",
+        url="https://doi.org/10.1007/978-1-4614-7138-7",
+    ),
     # ----- Agent architecture antecedents --------------------------------
     Citation(
         key="shinn_reflexion_2023",

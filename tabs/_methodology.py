@@ -96,6 +96,18 @@ DIAGNOSTIC_NOTES: tuple[MethodologyNote, ...] = (
         "honest on short held-out windows.",
         cites=("diebold_mariano_1995", "harvey_leybourne_newbold_1997"),
     ),
+    MethodologyNote(
+        "Variable independence + double-counting is analysed offline "
+        "with Spearman correlations, Variance Inflation Factors, and a "
+        "KSG mutual-information ranking, with results in "
+        "`docs/methodology/variable_selection.md`. The selection step "
+        "is not yet wired into the bakeoff (Phase 2 task).",
+        cites=(
+            "belsley_kuh_welsch_1980",
+            "kraskov_stoegbauer_grassberger_2004",
+            "james_witten_hastie_tibshirani_2013",
+        ),
+    ),
 )
 
 DATA_SOURCE_KEYS: tuple[str, ...] = (
